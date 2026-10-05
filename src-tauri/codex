@@ -32,6 +32,8 @@ if [[ ! -x "$codex_bin" ]]; then
 fi
 
 exec "$codex_bin" "$@" \
+  -c 'model=gpt-5.6-sol' \
+  -c 'model_reasoning_effort=medium' \
   -c 'mcp_servers.hyper3d.enabled=false' \
   -c 'mcp_servers.glm-mcp.enabled=false' \
   -c 'mcp_servers.lanhu.enabled=false' \

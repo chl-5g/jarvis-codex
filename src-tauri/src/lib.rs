@@ -18,6 +18,8 @@ use tokio::{
     time::{timeout, Duration},
 };
 
+const JARVIS_MODEL: &str = "gpt-5.6-sol";
+
 struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
@@ -828,6 +830,7 @@ async fn ensure_runtime(
     runtime.notify("initialized", json!({})).await?;
     let thread_options = json!({
         "cwd": cwd,
+        "model": JARVIS_MODEL,
         "approvalPolicy": profile.approval_policy,
         "sandbox": profile.sandbox,
         "baseInstructions": format!(

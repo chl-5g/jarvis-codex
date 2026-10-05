@@ -139,7 +139,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <footer class="controls">
     <button id="mic" class="control mic"><span aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg></span><b>CODEX VOICE</b><small>V3 WEBRTC · DIRECT</small></button>
     <form id="command-form" class="command"><input id="command-input" aria-label="文字指令" placeholder="Voice 不可用时，发送本地 Codex 文字任务…" autocomplete="off"><button>EXECUTE</button></form>
-    <button id="stop" class="control stop"><span aria-hidden="true"><svg viewBox="0 0 24 24"><rect class="stop-mark" x="6.5" y="6.5" width="11" height="11" rx="1.8"></rect></svg></span><b>STOP</b><small>INTERRUPT ALL</small></button>
+    <button id="stop" class="control stop" aria-label="暂停 Jarvis"><span id="stop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect class="stop-mark" x="6.5" y="6.5" width="11" height="11" rx="1.8"></rect></svg></span><b id="stop-label">PAUSE</b><small id="stop-hint">PAUSE ALL</small></button>
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
@@ -157,6 +157,10 @@ const settings = $("#settings-dialog") as HTMLDialogElement;
 const characterRig = $<HTMLElement>(".character-rig");
 const hoverControls = $<HTMLElement>(".controls");
 const settingsButton = $<HTMLButtonElement>("#settings");
+const stopButton = $<HTMLButtonElement>("#stop");
+const stopIcon = $("#stop-icon");
+const stopLabel = $("#stop-label");
+const stopHint = $("#stop-hint");
 let controlsHideTimer: number | undefined;
 let characterActionTimer: number | undefined;
 
@@ -196,12 +200,19 @@ const copy: Record<Mode, [string, string]> = {
   booting: ["INITIALIZING", "SYSTEM BOOT"], ready: ["READY", "CODEX VOICE STANDBY"],
   "voice-starting": ["VOICE LINKING", "OPENING CODEX VOICE"], listening: ["LISTENING", "OFFICIAL VOICE ONLINE"],
   working: ["CODEX WORKING", "TASK EXECUTION"], speaking: ["JARVIS SPEAKING", "VOICE OUTPUT"],
-  degraded: ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"], stopped: ["INTERRUPTED", "ALL SYSTEMS HALTED"],
+  degraded: ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"], stopped: ["PAUSED", "JARVIS PAUSED"],
 };
 
 function setMode(mode: Mode) {
   state.mode = mode; shell.setAttribute("data-mode", mode);
   $("#mode-label").textContent = copy[mode][0]; $("#identity-state").textContent = copy[mode][1];
+  const paused = mode === "stopped";
+  stopButton.setAttribute("aria-label", paused ? "恢复 Jarvis" : "暂停 Jarvis");
+  stopLabel.textContent = paused ? "RESUME" : "PAUSE";
+  stopHint.textContent = paused ? "RESUME VOICE" : "PAUSE ALL";
+  stopIcon.innerHTML = paused
+    ? '<svg viewBox="0 0 24 24"><path class="play-mark" d="M8 5.8v12.4a1.2 1.2 0 0 0 1.85 1.02l9.2-6.2a1.23 1.23 0 0 0 0-2.04l-9.2-6.2A1.2 1.2 0 0 0 8 5.8Z"></path></svg>'
+    : '<svg viewBox="0 0 24 24"><rect class="stop-mark" x="6.5" y="6.5" width="11" height="11" rx="1.8"></rect></svg>';
   if (mode === "voice-starting") {
     shell.classList.remove("is-forming");
     void shell.clientWidth;
@@ -938,6 +949,23 @@ mic.addEventListener("click", () => {
   else void startDirectVoice();
 });
 $("#stop").addEventListener("click", async () => {
+  if (state.mode === "stopped" || state.manualStop) {
+    state.manualStop = false;
+    state.agentWorking = false;
+    setMode("ready");
+    response.textContent = "正在恢复 Jarvis Voice…";
+    try {
+      await startDirectVoice({ coldStart: true });
+      if (!state.directVoice?.voiceActive && !peer && state.mode !== "degraded") {
+        await armWakeListener();
+        response.textContent = "Jarvis 已恢复，等待唤醒词。";
+      }
+    } catch (error) {
+      setMode("degraded");
+      response.textContent = `恢复失败：${String(error)}`;
+    }
+    return;
+  }
   triggerCharacterAction("error", 700);
   state.manualStop = true; setMode("stopped");
   state.agentWorking = false;

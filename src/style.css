@@ -62,7 +62,7 @@ html.visual-preview.transparency-grid,html.visual-preview.transparency-grid body
 .control svg{display:block;width:29px;height:29px;margin:0;overflow:visible}
 .mic svg{fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 .stop svg{width:27px;height:27px}
-.stop .stop-mark{fill:#ff5b51;stroke:#ff827b;stroke-width:.65;filter:drop-shadow(0 0 3px #ff493e)}
+.stop .stop-mark{fill:#ff5b51;stroke:#ff827b;stroke-width:.65;filter:drop-shadow(0 0 3px #ff493e)}.stop .play-mark{fill:currentColor;filter:drop-shadow(0 0 3px #ff493e)}
 .control b,.control small{display:none}
 .mic{left:34px;top:auto;bottom:30px}
 .stop{right:34px;top:auto;bottom:30px}

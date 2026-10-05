@@ -53,6 +53,9 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(codexWrapper, /scutil --proxy/);
   assert.match(codexWrapper, /HTTP_PROXY/);
   assert.match(codexWrapper, /HTTPS_PROXY/);
+  assert.match(codexWrapper, /model=gpt-5\.6-sol/);
+  assert.match(backend, /JARVIS_MODEL: &str = "gpt-5\.6-sol"/);
+  assert.match(backend, /"model": JARVIS_MODEL/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -92,6 +95,14 @@ test("idle text input starts Codex Voice so replies keep the original Codex voic
   assert.match(frontend, /await startDirectVoice\(\)/);
   assert.match(frontend, /await waitForVoiceActive\(\)/);
   assert.match(frontend, /Codex Voice 尚未连接/);
+});
+
+test("pause control can resume Jarvis and swaps to a play icon", () => {
+  assert.match(frontend, /state\.mode === "stopped" \|\| state\.manualStop/);
+  assert.match(frontend, /正在恢复 Jarvis Voice/);
+  assert.match(frontend, /stopLabel\.textContent = paused \? "RESUME" : "PAUSE"/);
+  assert.match(frontend, /stopped: \["PAUSED", "JARVIS PAUSED"\]/);
+  assert.match(frontend, /play-mark/);
 });
 
 test("production configuration persists workspace and resumes threads", () => {
