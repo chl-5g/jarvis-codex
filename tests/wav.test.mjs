@@ -123,11 +123,15 @@ test("text input button is labelled SEND", () => {
   assert.match(frontend, /<button>SEND<\/button>/);
 });
 
-test("voice button stops an active Voice session", () => {
+test("voice button mutes the microphone without stopping the Voice session", () => {
   assert.match(frontend, /mic\.addEventListener\("click"/);
   assert.match(frontend, /state\.directVoice\?\.voiceActive \|\| peer/);
-  assert.match(frontend, /void stopDirectVoice\(\)/);
-  assert.match(frontend, /关闭语音/);
+  assert.match(frontend, /toggleVoiceMute/);
+  assert.match(frontend, /track\.enabled = !state\.muted/);
+  assert.match(frontend, /MUTED/);
+  assert.match(frontend, /UNMUTED/);
+  const micHandler = frontend.match(/mic\.addEventListener\("click"[\s\S]*?\n\}\);/)?.[0] ?? "";
+  assert.doesNotMatch(micHandler, /stopDirectVoice/);
   assert.match(frontend, /class="slash-mark"/);
   assert.match(style, /\.mic \.slash-mark/);
 });
