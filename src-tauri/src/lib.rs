@@ -235,6 +235,9 @@ impl CodexRuntime {
                         .unwrap_or_else(|| "-".to_owned()),
                     message.get("method").and_then(Value::as_str).unwrap_or("-")
                 );
+                if matches!(message.get("method").and_then(Value::as_str), Some("error") | Some("thread/realtime/error")) {
+                    eprintln!("codex diagnostic: {}", message.pointer("/params/message").and_then(Value::as_str).or_else(|| message.pointer("/error/message").and_then(Value::as_str)).unwrap_or("unknown"));
+                }
                 if message.get("method").is_none() {
                     if let Some(id) = message.get("id").and_then(Value::as_u64) {
                         if let Some(runtime) = weak.upgrade() {
@@ -956,6 +959,9 @@ pub fn run() {
     let cold_wake_pending = arguments.iter().any(|argument| argument == "--jarvis-wake");
     let background_start = arguments.iter().any(|argument| argument == "--background");
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            raise_jarvis_window(app);
+        }))
         .manage(AppState {
             runtime: Mutex::new(None),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),

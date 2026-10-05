@@ -75,6 +75,14 @@ html.visual-preview.transparency-grid,html.visual-preview.transparency-grid body
 
 .degraded-banner{z-index:40}
 .visual-preview .degraded-banner{display:none!important}
+
+/* Keep the controls and conversation readable during real use. */
+.topbar,.controls{opacity:1!important}
+.icon-button,.control,.command{pointer-events:auto!important}
+.shell .dialogue{display:block!important;left:24px;bottom:118px;width:420px;max-height:260px;overflow:auto;transform:none;opacity:1;background:rgba(2,13,18,.92);border:1px solid rgba(var(--rgb),.4);border-radius:16px;backdrop-filter:blur(16px)}
+.dialogue p{max-height:none;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.command{opacity:1;background:rgba(2,13,18,.92);width:min(50vw,640px)}
+.shell .status{display:flex!important;position:absolute;left:24px;top:24px;padding:12px 16px;background:rgba(2,13,18,.92);border-radius:16px}
 dialog{z-index:50}
 
 @keyframes minimal-character-float{0%,100%{transform:translate(-50%,-50%)}50%{transform:translate(-50%,calc(-50% - 8px))}}
