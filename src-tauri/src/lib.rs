@@ -803,6 +803,13 @@ fn default_workspace() -> Result<String, String> {
         }
     }
     if let Ok(home) = std::env::var("HOME") {
+        let project_workspace = PathBuf::from(&home).join("Jarvis-codex/agent-workspace");
+        if project_workspace.is_dir() {
+            return project_workspace
+                .canonicalize()
+                .map(|value| value.to_string_lossy().into_owned())
+                .map_err(|error| format!("无法读取 Jarvis 项目工作目录：{error}"));
+        }
         let path = PathBuf::from(home);
         if path.is_dir() {
             return Ok(path.to_string_lossy().into_owned());
@@ -814,7 +821,12 @@ fn default_workspace() -> Result<String, String> {
 }
 
 fn validated_workspace(cwd: &str) -> Result<String, String> {
-    let path = PathBuf::from(cwd);
+    let requested = cwd.trim();
+    let path = if requested.is_empty() || requested.contains("/outputs/Jarvis/") {
+        PathBuf::from(default_workspace()?)
+    } else {
+        PathBuf::from(requested)
+    };
     if !path.is_dir() {
         return Err(format!("工作目录不存在或不是文件夹：{cwd}"));
     }

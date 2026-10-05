@@ -65,6 +65,7 @@ const state = {
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
+const PROJECT_WORKSPACE = "/Users/caihaolun/Jarvis-codex/agent-workspace";
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
@@ -87,7 +88,10 @@ function storedPermissionMode(): PermissionMode {
   const value = localStorage.getItem(PERMISSION_KEY);
   return value === "safe" ? "safe" : "full";
 }
-let workspace = "";
+// Keep the first Voice/wake callback from racing the async settings load with
+// an empty or root directory. A valid saved workspace replaces this value
+// during startup.
+let workspace = PROJECT_WORKSPACE;
 let permissionMode = storedPermissionMode();
 function storedModelMode(): ModelMode {
   const value = localStorage.getItem(MODEL_MODE_KEY);
@@ -903,6 +907,24 @@ async function acquireMicrophone(coldStart: boolean) {
   throw new Error("麦克风初始化失败");
 }
 
+async function ensureWorkspace() {
+  const usable = (value: string | undefined): value is string => Boolean(
+    value && value !== "/" && !value.includes("/outputs/Jarvis/"),
+  );
+  if (usable(workspace)) return workspace;
+  const configured = localStorage.getItem(WORKSPACE_KEY)?.trim();
+  if (usable(configured)) {
+    workspace = configured;
+  } else {
+    const resolved = await invoke<string>("default_workspace");
+    workspace = usable(resolved) ? resolved : PROJECT_WORKSPACE;
+  }
+  localStorage.setItem(WORKSPACE_KEY, workspace);
+  $("#workspace").textContent = workspace;
+  ($("#workspace-setting") as HTMLInputElement).value = workspace;
+  return workspace;
+}
+
 async function startDirectVoice({ coldStart = false } = {}) {
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
@@ -917,6 +939,7 @@ async function startDirectVoice({ coldStart = false } = {}) {
     return;
   }
   if (voiceStartInFlight || peer || state.directVoice?.voiceActive) return;
+  await ensureWorkspace();
   voiceStartInFlight = true;
   state.manualStop = false;
   recoverableColdStartError = false;
@@ -1141,6 +1164,7 @@ $("#command-form").addEventListener("submit", async (event) => {
     setMode("working");
     return;
   }
+  await ensureWorkspace();
   const useLocalQwen = modelMode === "qwen"
     || (modelMode === "hybrid" && !state.directVoice?.voiceActive);
   if (state.directVoice?.voiceActive && !useLocalQwen) {
@@ -1413,8 +1437,15 @@ for (const [selector, approved] of [["#approve", true], ["#deny", false]] as con
 
 if (currentWindow) {
   try {
-    workspace = localStorage.getItem(WORKSPACE_KEY)
-      ?? await invoke<string>("default_workspace");
+    const savedWorkspace = localStorage.getItem(WORKSPACE_KEY)?.trim();
+    if (savedWorkspace && savedWorkspace !== "/" && !savedWorkspace.includes("/outputs/Jarvis/")) {
+      workspace = savedWorkspace;
+    } else {
+      const resolved = await invoke<string>("default_workspace");
+      workspace = resolved && resolved !== "/" && !resolved.includes("/outputs/Jarvis/")
+        ? resolved
+        : PROJECT_WORKSPACE;
+    }
     localStorage.setItem(WORKSPACE_KEY, workspace);
     $("#thread-id").textContent = "Not started";
     $("#workspace").textContent = workspace;

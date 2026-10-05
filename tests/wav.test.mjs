@@ -102,6 +102,16 @@ test("text input can join the active Voice conversation", () => {
   assert.match(backend, /"thread\/realtime\/appendText"/);
 });
 
+test("workspace is initialized before voice or text turns", () => {
+  assert.match(frontend, /async function ensureWorkspace\(\)/);
+  assert.match(frontend, /const PROJECT_WORKSPACE = "\/Users\/caihaolun\/Jarvis-codex\/agent-workspace"/);
+  assert.match(frontend, /let workspace = PROJECT_WORKSPACE/);
+  assert.match(frontend, /value !== "\/"/);
+  assert.match(frontend, /await ensureWorkspace\(\);\n  voiceStartInFlight/);
+  assert.match(frontend, /await ensureWorkspace\(\);\n  const useLocalQwen/);
+  assert.match(frontend, /savedWorkspace !== "\/"/);
+});
+
 test("Codex Voice is primary and local speech is only the fallback", () => {
   assert.doesNotMatch(frontend, /voiceReplyRoute|containsChinese|local-zh/);
   assert.match(frontend, /voice: "cove"/);
