@@ -7,6 +7,8 @@ const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
 const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
+const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
+const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
 const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
   "utf8",
@@ -233,6 +235,27 @@ test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {
   assert.match(frontend, /本地 Qwen/);
   assert.match(frontend, /混合模式/);
   assert.match(frontend, /Codex 原生/);
+});
+
+test("local OpenAgentic tool gateway exposes bounded audited execution", () => {
+  assert.match(backend, /mod tools;/);
+  assert.match(backend, /tool_list/);
+  assert.match(backend, /tool_execute/);
+  assert.match(toolsBackend, /jarvis-event/);
+  assert.match(toolsBackend, /resolve_path/);
+  assert.match(toolsBackend, /dangerous/);
+  assert.match(toolsBackend, /MAX_OUTPUT/);
+});
+
+test("local knowledge bridge indexes Markdown roots and returns bounded source excerpts", () => {
+  assert.match(backend, /mod knowledge;/);
+  assert.match(backend, /knowledge_status/);
+  assert.match(backend, /knowledge_scan/);
+  assert.match(backend, /knowledge_search/);
+  assert.match(backend, /KnowledgeStore::default\(\)\.context/);
+  assert.match(knowledgeBackend, /JARVIS_KNOWLEDGE_ROOTS/);
+  assert.match(knowledgeBackend, /incrementally indexed|Incrementally scan/);
+  assert.match(knowledgeBackend, /Source:/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {

@@ -31,6 +31,14 @@ type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
 type ModelMode = "hybrid" | "qwen" | "codex";
 type QwenEvent = { delta?: string; done?: boolean; error?: string };
+type JarvisEvent = {
+  kind?: string;
+  phase?: string;
+  callId?: string;
+  toolName?: string;
+  output?: string;
+  error?: string;
+};
 const SPEAKER_GATE_ENABLED = false;
 
 const state = {
@@ -985,6 +993,24 @@ async function stopDirectVoice() {
 }
 
 if (currentWindow) {
+  await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
+    if (payload.kind !== "tool") return;
+    const tool = payload.toolName ?? "tool";
+    if (payload.phase === "started") {
+      appendStreamLine(`工具开始：${tool}`, "tool", `tool-${payload.callId ?? tool}`);
+      setMode("working");
+      setWorker("developer", `${tool} working`);
+      return;
+    }
+    const key = `tool-${payload.callId ?? tool}`;
+    if (payload.phase === "error") {
+      appendStreamLine(`工具失败：${tool}：${payload.error ?? "unknown error"}`, "error", key);
+      setWorker("developer", "Tool error", false);
+      return;
+    }
+    appendStreamLine(`工具完成：${tool}${payload.output ? ` · ${payload.output}` : ""}`, "tool", key);
+    setWorker("developer", "Tool ready", false);
+  });
   await listen<QwenEvent>("qwen-event", ({ payload }) => {
     if (payload.error) {
       appendStreamLine(`本地 Qwen：${payload.error}`, "error", "qwen-assistant");

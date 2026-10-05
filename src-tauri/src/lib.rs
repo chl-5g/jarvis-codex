@@ -18,8 +18,10 @@ use tokio::{
     time::{timeout, Duration},
 };
 
+mod knowledge;
 mod memory;
 mod qwen;
+mod tools;
 
 const JARVIS_MODEL: &str = "gpt-5.6-sol";
 
@@ -1045,6 +1047,12 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
 
 fn with_memory_context(text: &str) -> String {
     let context = memory_store().recall(text, 4_000);
+    let knowledge = knowledge::KnowledgeStore::default().context(text, 4_000);
+    let context = [context, knowledge]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
     if context.is_empty() {
         return text.to_owned();
     }
@@ -1073,6 +1081,42 @@ fn memory_save_episode(
     tags: Vec<String>,
 ) -> Result<String, String> {
     memory_store().save_episode(&title, &summary, &tags)
+}
+
+#[tauri::command]
+fn knowledge_status() -> knowledge::KnowledgeStatus {
+    knowledge::KnowledgeStore::default().status()
+}
+
+#[tauri::command]
+fn knowledge_scan() -> Result<knowledge::KnowledgeScanResult, String> {
+    knowledge::KnowledgeStore::default().scan()
+}
+
+#[tauri::command]
+fn knowledge_search(
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<knowledge::KnowledgeResult>, String> {
+    knowledge::KnowledgeStore::default().search(&query, limit.unwrap_or(5))
+}
+
+#[tauri::command]
+fn tool_list() -> Vec<tools::ToolSpec> {
+    tools::list()
+}
+
+#[tauri::command]
+async fn tool_execute(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    tool_name: String,
+    args: Value,
+) -> Result<tools::ToolResult, String> {
+    let runtime = runtime(&state).await?;
+    let workspace = PathBuf::from(runtime.workspace.clone());
+    let full_access = runtime.permission_mode == PermissionMode::Full;
+    Ok(tools::execute(app, &workspace, &tool_name, args, full_access).await)
 }
 
 #[tauri::command]
@@ -1251,6 +1295,11 @@ pub fn run() {
             memory_recall,
             memory_save_core,
             memory_save_episode,
+            knowledge_status,
+            knowledge_scan,
+            knowledge_search,
+            tool_list,
+            tool_execute,
             local_qwen_chat,
             speak_text,
             stop_all,
