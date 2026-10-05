@@ -667,7 +667,7 @@ function updateVoiceInfo(info: DirectVoice) {
     ? '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path><path class="slash-mark" d="M4 4 20 20"></path></svg>'
     : '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg>';
   mic.setAttribute("aria-label", state.muted ? "取消静音" : info.voiceActive ? "静音麦克风" : "开启语音");
-  mic.querySelector("b")!.textContent = state.muted ? "MUTED" : info.voiceActive ? "UNMUTED" : "CODEX VOICE";
+  mic.querySelector("b")!.textContent = state.muted ? "MUTED" : "UNMUTED";
   mic.querySelector("small")!.textContent = state.muted ? "CLICK TO UNMUTE" : info.voiceActive ? "CLICK TO MUTE" : "V3 WEBRTC · DIRECT";
   $("#voice-auth").textContent = info.codexConnected
     ? `${info.protocol} · ${info.voiceActive ? "connected" : info.phase}`
@@ -1043,14 +1043,6 @@ function setVoiceMuted(muted: boolean) {
   appendStreamLine(muted ? "麦克风已静音" : "麦克风已取消静音", "system");
 }
 
-async function toggleVoiceMute() {
-  if (!state.directVoice?.voiceActive && !peer) {
-    await startDirectVoice();
-    return;
-  }
-  setVoiceMuted(!state.muted);
-}
-
 if (currentWindow) {
   await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
     if (payload.kind === "workflow" || payload.kind === "task") {
@@ -1239,9 +1231,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   }
 });
 mic.addEventListener("click", () => {
-  void toggleVoiceMute().catch((error) => {
-    response.textContent = `麦克风状态切换失败：${String(error)}`;
-  });
+  setVoiceMuted(!state.muted);
 });
 $("#stop").addEventListener("click", async () => {
   if (state.mode === "stopped" || state.manualStop) {
