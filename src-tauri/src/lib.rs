@@ -19,9 +19,11 @@ use tokio::{
 };
 
 mod bridge;
+mod events;
 mod knowledge;
 mod memory;
 mod qwen;
+mod skills;
 mod tasks;
 mod tools;
 mod workflow;
@@ -30,6 +32,21 @@ const JARVIS_MODEL: &str = "gpt-5.6-sol";
 
 fn memory_store() -> memory::MemoryStore {
     memory::MemoryStore::default()
+}
+
+#[tauri::command]
+fn skills_list() -> Vec<skills::SkillMetadata> {
+    skills::SkillsRegistry::default().list()
+}
+
+#[tauri::command]
+fn skills_match(query: String, limit: Option<usize>) -> Vec<skills::SkillMatch> {
+    skills::SkillsRegistry::default().route(&query, limit.unwrap_or(4))
+}
+
+#[tauri::command]
+fn skills_context(query: String, max_chars: Option<usize>) -> String {
+    skills::SkillsRegistry::default().context(&query, max_chars.unwrap_or(4_000))
 }
 
 struct AppState {
@@ -370,7 +387,8 @@ impl CodexRuntime {
                         _ => {}
                     }
                 }
-                let _ = event_app.emit("codex-event", message);
+                let _ = event_app.emit("codex-event", message.clone());
+                crate::events::emit(&event_app, "codex", message);
             }
         });
         tauri::async_runtime::spawn(async move {
@@ -1050,8 +1068,9 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
 
 fn with_memory_context(text: &str) -> String {
     let context = memory_store().recall(text, 4_000);
+    let working = memory_store().read_working(2_000);
     let knowledge = knowledge::KnowledgeStore::default().context(text, 4_000);
-    let context = [context, knowledge]
+    let context = [context, working, knowledge]
         .into_iter()
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
@@ -1084,6 +1103,39 @@ fn memory_save_episode(
     tags: Vec<String>,
 ) -> Result<String, String> {
     memory_store().save_episode(&title, &summary, &tags)
+}
+
+#[tauri::command]
+fn memory_working_append(role: String, content: String) -> Result<String, String> {
+    memory_store().append_working(&role, &content)
+}
+
+#[tauri::command]
+fn memory_working_context(max_chars: Option<usize>) -> String {
+    memory_store().read_working(max_chars.unwrap_or(8_000))
+}
+
+#[tauri::command]
+fn memory_working_compress(
+    summary: Option<String>,
+    keep_recent: Option<usize>,
+) -> Result<String, String> {
+    memory_store().compress_working(summary.as_deref(), keep_recent.unwrap_or(4))
+}
+
+#[tauri::command]
+fn memory_save_procedure(
+    name: String,
+    description: String,
+    trigger_pattern: String,
+    steps: Vec<String>,
+) -> Result<String, String> {
+    memory_store().save_procedure(&name, &description, &trigger_pattern, &steps)
+}
+
+#[tauri::command]
+fn memory_search_procedures(query: String, limit: Option<usize>) -> Vec<memory::ProcedureNote> {
+    memory_store().search_procedures(&query, limit.unwrap_or(8))
 }
 
 #[tauri::command]
@@ -1211,8 +1263,18 @@ async fn tool_execute(
 }
 
 #[tauri::command]
-async fn local_qwen_chat(app: AppHandle, text: String) -> Result<String, String> {
-    qwen::chat(app, text).await
+async fn local_qwen_chat(
+    app: AppHandle,
+    text: String,
+    workspace: Option<String>,
+) -> Result<String, String> {
+    let workspace = workspace
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| validated_workspace(&value))
+        .transpose()?
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_workspace().unwrap_or_else(|_| ".".to_owned())));
+    qwen::chat(app, text, workspace).await
 }
 
 async fn stop_speech(state: &AppState) {
@@ -1386,6 +1448,14 @@ pub fn run() {
             memory_recall,
             memory_save_core,
             memory_save_episode,
+            memory_working_append,
+            memory_working_context,
+            memory_working_compress,
+            memory_save_procedure,
+            memory_search_procedures,
+            skills_list,
+            skills_match,
+            skills_context,
             knowledge_status,
             knowledge_scan,
             knowledge_search,

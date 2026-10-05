@@ -1,5 +1,5 @@
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::{process::Command, time::timeout};
 
 const MAX_OUTPUT: usize = 12_000;
@@ -74,7 +74,8 @@ pub fn list() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "run_command",
-            description: "Run a shell command from the active workspace with a timeout.",
+            description:
+                "Run a read-only command from the active workspace using the local whitelist.",
             requires_full_access: true,
         },
         ToolSpec {
@@ -83,6 +84,84 @@ pub fn list() -> Vec<ToolSpec> {
             requires_full_access: false,
         },
     ]
+}
+
+/// OpenAI-compatible function schemas for local Qwen/Xinference providers.
+/// Keep this registry in one place so workflows, the UI and model routing all
+/// observe the same bounded tool surface.
+pub fn openai_schemas() -> Vec<Value> {
+    vec![
+        schema(
+            "read_file",
+            "Read a UTF-8 text file within the active workspace.",
+            json!({
+                "path": {"type": "string", "description": "Workspace-relative or explicitly permitted path"}
+            }),
+            &["path"],
+        ),
+        schema(
+            "write_file",
+            "Create or replace a UTF-8 text file within the active workspace.",
+            json!({
+                "path": {"type": "string"}, "content": {"type": "string"}
+            }),
+            &["path", "content"],
+        ),
+        schema(
+            "append_file",
+            "Append UTF-8 text to a file within the active workspace.",
+            json!({
+                "path": {"type": "string"}, "content": {"type": "string"}
+            }),
+            &["path", "content"],
+        ),
+        schema(
+            "list_files",
+            "List files below a workspace directory.",
+            json!({
+                "path": {"type": "string", "description": "Directory, default ."}
+            }),
+            &[],
+        ),
+        schema(
+            "search_files",
+            "Search text files below a workspace directory.",
+            json!({
+                "query": {"type": "string"}, "path": {"type": "string", "description": "Directory, default ."}
+            }),
+            &["query"],
+        ),
+        schema(
+            "run_command",
+            "Run a non-destructive shell command from the active workspace with a timeout.",
+            json!({
+                "command": {"type": "string"}, "timeout": {"type": "integer", "minimum": 1, "maximum": DEFAULT_TIMEOUT_SECONDS}
+            }),
+            &["command"],
+        ),
+        schema(
+            "current_time",
+            "Return the current UTC time.",
+            json!({}),
+            &[],
+        ),
+    ]
+}
+
+fn schema(
+    name: &'static str,
+    description: &'static str,
+    properties: Value,
+    required: &[&str],
+) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {"type": "object", "properties": properties, "required": required, "additionalProperties": false}
+        }
+    })
 }
 
 pub async fn execute(
@@ -233,8 +312,13 @@ async fn run_command(root: &Path, args: &Value, full_access: bool) -> Result<Str
     if command.trim().is_empty() {
         return Err("run_command 需要 command".to_owned());
     }
-    if is_dangerous(command) && !full_access {
-        return Err("命令被工具网关拦截：需要完全访问权限".to_owned());
+    if !full_access {
+        if is_dangerous(command) {
+            return Err("命令被工具网关拦截：需要完全访问权限".to_owned());
+        }
+        if !restricted_command_allowed(command) {
+            return Err("命令被工具网关拦截：本地 Agent 只允许只读白名单命令".to_owned());
+        }
     }
     let requested_timeout = args
         .get("timeout")
@@ -310,15 +394,34 @@ fn collect_files(path: &Path, output: &mut Vec<PathBuf>, limit: usize) {
     if output.len() >= limit {
         return;
     }
-    if path.is_file() {
+    // Never follow symlinked files or directories during recursive traversal.
+    // `Path::is_file`/`is_dir` follow links, which would let a workspace-local
+    // link expose an arbitrary tree to list/search tools.
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() {
+        return;
+    }
+    if metadata.is_file() {
         output.push(path.to_owned());
+        return;
+    }
+    if !metadata.is_dir() {
         return;
     }
     let Ok(entries) = fs::read_dir(path) else {
         return;
     };
     for entry in entries.flatten() {
-        collect_files(&entry.path(), output, limit);
+        let child = entry.path();
+        let Ok(child_metadata) = entry.file_type() else {
+            continue;
+        };
+        if child_metadata.is_symlink() {
+            continue;
+        }
+        collect_files(&child, output, limit);
         if output.len() >= limit {
             break;
         }
@@ -340,28 +443,88 @@ fn truncate(mut text: String) -> String {
 }
 
 fn is_dangerous(command: &str) -> bool {
-    let mut words = command.split_whitespace();
-    let first = words.next().unwrap_or_default();
-    let command = if first == "sudo" {
-        words.next().unwrap_or_default()
-    } else {
-        first
+    // The command is executed through `zsh -lc`, so shell composition and
+    // redirection are unsafe even when the first word looks harmless. Reject
+    // these controls conservatively in restricted mode, rather than trying to
+    // implement a shell parser here.
+    if command
+        .chars()
+        .any(|character| matches!(character, ';' | '&' | '|' | '`' | '>' | '<'))
+        || command.contains("$(")
+    {
+        return true;
+    }
+
+    // Inspect every shell word. This catches a dangerous command after an
+    // environment assignment, `sudo`, or a benign-looking command prefix.
+    let words = command
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|character: char| matches!(character, '\'' | '"' | '(' | ')' | '\\'))
+        })
+        .map(|word| word.rsplit('/').next().unwrap_or(word).to_owned())
+        .collect::<Vec<_>>();
+    words.iter().enumerate().any(|(index, word)| {
+        let code_runner = matches!(
+            word.as_str(),
+            "python"
+                | "python2"
+                | "python3"
+                | "node"
+                | "nodejs"
+                | "ruby"
+                | "perl"
+                | "osascript"
+                | "bash"
+                | "sh"
+                | "zsh"
+        );
+        let code_flag = words
+            .get(index + 1)
+            .is_some_and(|argument| matches!(argument.as_str(), "-c" | "-e" | "--eval"));
+        matches!(
+            word.as_str(),
+            "rm" | "rmdir"
+                | "dd"
+                | "mkfs"
+                | "fdisk"
+                | "shutdown"
+                | "reboot"
+                | "kill"
+                | "killall"
+                | "chmod"
+                | "chown"
+                | "curl"
+                | "wget"
+        ) || (code_runner && code_flag)
+    })
+}
+
+/// Commands exposed to the local Qwen path are deliberately read-only and
+/// small in scope. Codex's explicit full-access profile uses the existing
+/// permission boundary instead of this local allowlist.
+fn restricted_command_allowed(command: &str) -> bool {
+    if command.trim().is_empty() || is_dangerous(command) {
+        return false;
+    }
+    let words = command.split_whitespace().collect::<Vec<_>>();
+    let Some(first) = words.first() else {
+        return false;
     };
-    matches!(
-        command,
-        "rm" | "rmdir"
-            | "dd"
-            | "mkfs"
-            | "fdisk"
-            | "shutdown"
-            | "reboot"
-            | "kill"
-            | "killall"
-            | "chmod"
-            | "chown"
-            | "curl"
-            | "wget"
-    )
+    let first = Path::new(first.trim_matches(['\'', '"', '(', ')', '\\']))
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    match first {
+        "pwd" | "ls" | "find" | "du" | "df" | "file" | "stat" | "wc" | "head" | "tail" | "cat"
+        | "rg" | "grep" | "date" | "uname" | "whoami" => true,
+        "diskutil" => words.get(1).is_some_and(|word| *word == "list"),
+        "git" => matches!(
+            words.get(1).copied(),
+            Some("status" | "diff" | "log" | "show")
+        ),
+        _ => false,
+    }
 }
 
 fn next_call_id() -> String {
@@ -384,10 +547,11 @@ fn chrono_like_now() -> String {
 }
 
 fn emit_event(app: &AppHandle, event: ToolEvent) {
-    if let Ok(payload) = serde_json::to_value(&event) {
-        crate::bridge::publish("tool", payload);
+    // The shared envelope publishes this on the renderer's `jarvis-event`
+    // channel and mirrors it to the localhost bridge.
+    if let Ok(payload) = serde_json::to_value(event) {
+        crate::events::emit(app, "tool", payload);
     }
-    let _ = app.emit("jarvis-event", event);
 }
 
 #[cfg(test)]
@@ -414,7 +578,25 @@ mod tests {
     fn dangerous_commands_require_full_access() {
         assert!(is_dangerous("rm -rf /tmp/example"));
         assert!(is_dangerous("sudo reboot"));
+        assert!(is_dangerous("echo done; rm -rf /tmp/example"));
+        assert!(is_dangerous("printf '%s' \"$(rm -rf /tmp/example)\""));
+        assert!(is_dangerous("cat input.txt | rm -f output.txt"));
+        assert!(is_dangerous("echo secret > /tmp/output"));
+        assert!(is_dangerous("/bin/rm -rf /tmp/example"));
+        assert!(is_dangerous("env SAFE=1 /usr/bin/curl https://example.com"));
+        assert!(is_dangerous("python3 -c 'print(1)'"));
+        assert!(is_dangerous("node --eval 'console.log(1)'"));
         assert!(!is_dangerous("git status"));
+    }
+
+    #[test]
+    fn restricted_commands_use_a_small_read_only_allowlist() {
+        assert!(restricted_command_allowed("df -h /"));
+        assert!(restricted_command_allowed("git status --short"));
+        assert!(restricted_command_allowed("diskutil list"));
+        assert!(!restricted_command_allowed("python -c 'print(1)'"));
+        assert!(!restricted_command_allowed("git reset --hard"));
+        assert!(!restricted_command_allowed("echo ok; df -h"));
     }
 
     #[test]
@@ -442,5 +624,36 @@ mod tests {
             search_files(&root, &serde_json::json!({"query": "knowledge"}), false).unwrap();
         assert!(result.contains("Jarvis local knowledge"));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_traversal_skips_symlinked_files_and_directories() {
+        use std::os::unix::fs::symlink;
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "jarvis-tools-symlink-{}-{stamp}",
+            std::process::id()
+        ));
+        let outside = root.with_extension("outside");
+        fs::create_dir_all(root.join("nested")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(root.join("nested/real.md"), "inside").unwrap();
+        fs::write(outside.join("secret.md"), "must not leak").unwrap();
+        symlink(outside.join("secret.md"), root.join("file-link.md")).unwrap();
+        symlink(&outside, root.join("dir-link")).unwrap();
+
+        let mut files = Vec::new();
+        collect_files(&root, &mut files, MAX_LIST_RESULTS);
+        assert!(files.iter().any(|path| path.ends_with("nested/real.md")));
+        assert!(!files.iter().any(|path| path.ends_with("file-link.md")));
+        assert!(!files.iter().any(|path| path.ends_with("secret.md")));
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(outside);
     }
 }

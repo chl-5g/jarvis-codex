@@ -7,6 +7,7 @@ const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
 const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
+const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
 const workflowBackend = await readFile(new URL("../src-tauri/src/workflow.rs", import.meta.url), "utf8");
@@ -235,6 +236,31 @@ test("local Qwen route keeps reasoning out of Jarvis rendering", () => {
   assert.match(frontend, /local_qwen_chat/);
   assert.match(frontend, /modelMode/);
   assert.match(frontend, /[Rr]easoning/);
+});
+
+test("local Qwen can call the audited tool gateway and keeps the selected workspace", () => {
+  assert.match(qwenBackend, /openai_schemas/);
+  assert.match(qwenBackend, /MAX_TOOL_ROUNDS/);
+  assert.match(qwenBackend, /tools::execute/);
+  assert.match(qwenBackend, /"role":"tool"/);
+  assert.match(qwenBackend, /JARVIS_QWEN_TOOLS/);
+  assert.match(qwenBackend, /Agent 工具层已经接入并可用/);
+  assert.match(backend, /async fn local_qwen_chat/);
+  assert.match(backend, /validated_workspace/);
+  assert.match(frontend, /local_qwen_chat.*workspace/);
+});
+
+test("Codex, Qwen, tools, workflows, and tasks publish one local event envelope", () => {
+  assert.match(eventsBackend, /schema_version/);
+  assert.match(eventsBackend, /event_id/);
+  assert.match(eventsBackend, /timestamp/);
+  assert.match(eventsBackend, /source/);
+  assert.match(eventsBackend, /jarvis-event/);
+  assert.match(backend, /crate::events::emit\(&event_app, "codex"/);
+  assert.match(qwenBackend, /crate::events::emit/);
+  assert.match(toolsBackend, /crate::events::emit/);
+  assert.match(workflowBackend, /crate::events::emit/);
+  assert.match(tasksBackend, /crate::events::emit/);
 });
 
 test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {

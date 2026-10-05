@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
 const MAX_TASKS: usize = 500;
 
@@ -253,8 +253,7 @@ fn now() -> u64 {
 }
 fn emit(app: &AppHandle, phase: &'static str, task: &TaskRecord, error: Option<&str>) {
     let event = serde_json::json!({"kind":"task", "phase":phase, "taskId":task.id, "workflowId":task.workflow_id, "message":error});
-    let _ = app.emit("jarvis-event", &event);
-    crate::bridge::publish("task", event);
+    crate::events::emit(app, "task", event);
 }
 
 #[cfg(test)]

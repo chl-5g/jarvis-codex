@@ -96,6 +96,52 @@ Swift 唤醒 helper 与 Voice 会话不会同时采集麦克风。运行时、�
 Voice 暂时不可用时，可以使用底部文字输入框。语音和文字都会进入当前工作目录所
 对应的线程。
 
+## 断网运行：本地 Qwen 与 Agent 工具层
+
+Jarvis 现在有一条完全本地的文字任务路径。设置中的“本地 Qwen”会请求本机
+`127.0.0.1:8080/v1/chat/completions`，默认模型是
+`/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit`。模型可以通过 OpenAI 兼容的
+`tools` 字段调用 Agent 工具；Jarvis 执行工具后把结果作为 `tool` 消息回传给模型，
+最多进行四轮工具调用，最终答案才会显示和播报。
+
+本地工具都经过同一个白名单网关：
+
+- `read_file`、`write_file`、`append_file`：直接读写 UTF-8 文件，不经过 Obsidian GUI；
+- `list_files`、`search_files`：在当前工作目录内列出和检索文件，不跟随符号链接；
+- `current_time`：读取本机时间；
+- `run_command`：执行当前工作目录中的命令，受超时、输出长度和危险命令检查限制。
+
+本地 Qwen 默认只允许当前工作目录，命令组合符号、删除、改权限、网络下载等高风险
+操作会被网关拒绝。需要 Codex 原生工具和 Computer Use 时，仍然使用 Codex 路由及
+权限模式。直接编辑 `~/notes` 时，把工作目录设为 `~/notes`（或其上级目录），
+模型会直接写磁盘文件，不会声称必须通过 Obsidian。
+
+四层 OpenAgentic 兼容记忆保存在 `~/.openagentic/memory/`：
+
+```text
+working/working.md # 当前会话，支持压缩并保留最近若干条
+core/              # 用户资料、项目事实、偏好、参考资料
+episodes/          # 情节/对话记忆
+procedures/        # 带 frontmatter、wikilink 和 backlink 的程序性记忆
+```
+
+这些文件是本地 Markdown，可直接用 Obsidian 查看。默认会把工作记忆、相关核心记忆、
+情节记忆、程序性记忆和本地知识库作为数据上下文注入模型；内容不会被当成命令执行。
+可用 `OPENAGENTIC_MEMORY_DIR`、`JARVIS_KNOWLEDGE_ROOTS` 和 `JARVIS_SKILLS_ROOTS`
+覆盖默认目录。Skills 从 `SKILL.md` 发现、按请求路由，并通过 `allowed-tools` 白名单
+限制可用工具。
+
+断网前可以检查本地链路：
+
+```bash
+curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+返回模型列表后，在 Jarvis 设置中选“本地 Qwen”。本地 Qwen、工具网关、Markdown
+记忆、知识库和打包的 Kokoro 语音不需要互联网；Codex 原生 Voice/WebRTC 仍需要网络，
+断网时应使用本地 Qwen 路由。工具、Qwen、Codex、工作流和任务事件会统一发布到本地
+`jarvis-event` 流，便于界面和本机适配器观察执行进度。
+
 ## 权限模式
 
 | 模式 | Sandbox | 审批策略 | 使用场景 |

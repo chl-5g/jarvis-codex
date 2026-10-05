@@ -1153,7 +1153,7 @@ $("#command-form").addEventListener("submit", async (event) => {
     setMode("working");
     appendStreamLine("本地 Qwen 开始处理", "task");
     try {
-      const answer = await invoke<string>("local_qwen_chat", { text });
+      const answer = await invoke<string>("local_qwen_chat", { text, workspace });
       const finalAnswer = answer.trim() || qwenAnswerBuffer.trim();
       if (!finalAnswer) throw new Error("本地 Qwen 没有返回最终答案");
       response.textContent = finalAnswer;

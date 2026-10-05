@@ -12,7 +12,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 const MAX_WORKFLOWS: usize = 200;
 const MAX_STEPS: usize = 64;
@@ -367,8 +367,8 @@ fn emit(
         step_id: step.map(|item| item.id.clone()),
         message: message.map(str::to_owned),
     };
-    let _ = app.emit("jarvis-event", &event);
-    crate::bridge::publish(
+    crate::events::emit(
+        app,
         "workflow",
         serde_json::to_value(event).unwrap_or(Value::Null),
     );

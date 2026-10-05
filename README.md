@@ -104,6 +104,50 @@ trust boundaries.
 If Voice is unavailable, use the text field at the bottom. Voice and text use
 the thread associated with the current workspace.
 
+## Offline local Qwen and the Agent tool layer
+
+Jarvis includes a fully local text path. Select `Local Qwen` in Settings to use
+the OpenAI-compatible endpoint at `127.0.0.1:8080/v1/chat/completions`. The
+default model is `/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit`. Qwen can emit
+OpenAI-compatible function calls; Jarvis executes each call through the local
+audited gateway, returns the result as a `tool` message, and allows at most four
+tool rounds before producing the final answer.
+
+The gateway exposes bounded local tools: `read_file`, `write_file`,
+`append_file`, `list_files`, `search_files`, `current_time`, and `run_command`.
+File traversal stays inside the selected workspace and skips symlinks. Shell
+composition, deletion, permission changes, network download commands, timeouts,
+and oversized output are blocked in the local Qwen path. Direct file edits go
+to disk and do not require Obsidian; select `~/notes` (or its parent) as the
+workspace when that is the intended target.
+
+OpenAgentic-compatible Markdown memory lives under `~/.openagentic/memory/`:
+
+```text
+working/working.md # current working memory, with bounded compression
+core/              # user profile, project facts, preferences, references
+episodes/          # episodic conversation memory
+procedures/        # Obsidian-compatible procedural notes and backlinks
+```
+
+Working memory, relevant core/episodic/procedural memory, local Markdown
+knowledge, and routed `SKILL.md` files are supplied as data context. They are
+never executed as instructions. Use `OPENAGENTIC_MEMORY_DIR`,
+`JARVIS_KNOWLEDGE_ROOTS`, and `JARVIS_SKILLS_ROOTS` to override local roots.
+Skill `allowed-tools` metadata constrains the tools exposed to the local model.
+
+Before disconnecting the network, verify the local model is ready:
+
+```bash
+curl -fsS http://127.0.0.1:8080/v1/models
+```
+
+Local Qwen, the gateway, Markdown memory, the local knowledge index, and the
+bundled Kokoro speech fallback continue to work offline. Codex native
+Voice/WebRTC still requires network access, so use the Local Qwen route while
+offline. Tool, Qwen, Codex, workflow, and task activity is published through
+the unified local `jarvis-event` stream.
+
 ## Permission profiles
 
 | Profile | Sandbox | Approval policy | Intended use |
