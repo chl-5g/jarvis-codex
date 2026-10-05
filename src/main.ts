@@ -133,8 +133,12 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <article class="worker" data-role="reviewer"><span>✓</span><div><b>Reviewer</b><small>Standby</small></div><i></i></article>
   </aside>
   <section class="dialogue hud-panel">
-    <b>YOU</b><p id="user-transcript">“嗨，Jarvis”</p>
-    <b class="jarvis">JARVIS</b><p id="assistant-transcript">正在连接 Codex 原生任务线程…</p>
+    <div class="dialogue-title"><b>JARVIS STREAM</b><small id="stream-state">LIVE</small></div>
+    <div id="event-stream" class="event-stream" aria-live="polite" aria-label="Jarvis 实时对话信息"></div>
+    <div class="dialogue-current">
+      <b>YOU</b><p id="user-transcript">“嗨，Jarvis”</p>
+      <b class="jarvis">JARVIS</b><p id="assistant-transcript">正在连接 Codex 原生任务线程…</p>
+    </div>
   </section>
   <footer class="controls">
     <button id="mic" class="control mic"><span aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg></span><b>CODEX VOICE</b><small>V3 WEBRTC · DIRECT</small></button>
@@ -150,6 +154,8 @@ const $ = <T extends Element>(selector: string) => document.querySelector<T>(sel
 const shell = $<HTMLElement>(".shell");
 const transcript = $("#user-transcript");
 const response = $("#assistant-transcript");
+const eventStream = $("#event-stream");
+const streamState = $("#stream-state");
 const banner = $("#degraded-banner") as HTMLDivElement;
 const mic = $("#mic") as HTMLButtonElement;
 const approval = $("#approval") as HTMLDialogElement;
@@ -163,6 +169,68 @@ const stopLabel = $("#stop-label");
 const stopHint = $("#stop-hint");
 let controlsHideTimer: number | undefined;
 let characterActionTimer: number | undefined;
+type StreamKind = "user" | "assistant" | "task" | "tool" | "system" | "error";
+type StreamLine = { kind: StreamKind; text: string; key?: string; time: string };
+const streamLines: StreamLine[] = [];
+
+function streamTime() {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function renderStream() {
+  const fragment = document.createDocumentFragment();
+  for (const line of streamLines) {
+    const row = document.createElement("div");
+    row.className = `stream-line stream-${line.kind}`;
+    const time = document.createElement("time");
+    time.textContent = line.time;
+    const body = document.createElement("span");
+    body.textContent = line.text;
+    row.append(time, body);
+    fragment.append(row);
+  }
+  eventStream.replaceChildren(fragment);
+  eventStream.scrollTop = eventStream.scrollHeight;
+  for (const current of [transcript, response]) current.scrollTop = current.scrollHeight;
+}
+
+function findOpenStreamLine(key: string) {
+  for (let index = streamLines.length - 1; index >= 0; index -= 1) {
+    const line = streamLines[index];
+    if (line.key === key) return line;
+  }
+  return undefined;
+}
+
+function appendStreamLine(text: string, kind: StreamKind = "system", key?: string) {
+  const clean = text.trim();
+  if (!clean) return;
+  const previous = key ? findOpenStreamLine(key) : undefined;
+  if (previous && previous.key === key) {
+    previous.text = clean;
+    previous.kind = kind;
+  } else {
+    streamLines.push({ kind, text: clean, key, time: streamTime() });
+    if (streamLines.length > 80) streamLines.splice(0, streamLines.length - 80);
+  }
+  renderStream();
+}
+
+function sealStreamLine(key: string) {
+  const previous = findOpenStreamLine(key);
+  if (previous?.key === key) delete previous.key;
+}
+
+function describeEventItem(params: any) {
+  const item = params?.item ?? params;
+  const type = String(item?.type ?? "任务步骤");
+  const role = roleOf(params);
+  if (type === "agentMessage") return "Jarvis 回复";
+  if (type.toLowerCase().includes("command")) return `${role} 执行电脑指令`;
+  if (type.toLowerCase().includes("file")) return `${role} 处理文件`;
+  if (type.toLowerCase().includes("mcp") || type.toLowerCase().includes("tool")) return `${role} 调用工具`;
+  return `${role}：${type}`;
+}
 
 function revealControls() {
   if (controlsHideTimer !== undefined) window.clearTimeout(controlsHideTimer);
@@ -575,26 +643,34 @@ async function handle(message: Message) {
     setMode("listening");
     triggerCharacterAction("acknowledge");
     setWorker("orchestrator", "Official Voice online");
+    streamState.textContent = "LIVE";
+    appendStreamLine("Codex Voice 已连接", "system");
     response.textContent = "Codex 官方 Voice 已上线。你现在可以直接和 Jarvis 对话。";
   } else if (method === "thread/realtime/transcript/delta") {
     const delta = typeof params?.delta === "string" ? params.delta : "";
     if (params?.role === "assistant") {
       assistantTranscriptBuffer += delta;
       response.textContent = assistantTranscriptBuffer;
+      appendStreamLine(assistantTranscriptBuffer, "assistant", "voice-assistant");
       if (!state.agentWorking) setMode("speaking");
     } else {
       userTranscriptBuffer += delta;
       transcript.textContent = userTranscriptBuffer;
+      appendStreamLine(userTranscriptBuffer, "user", "voice-user");
       if (!state.agentWorking) setMode("listening");
     }
   } else if (method === "thread/realtime/transcript/done") {
     const text = typeof params?.text === "string" ? params.text.trim() : "";
     if (params?.role === "assistant") {
       if (text) response.textContent = text;
+      if (text) appendStreamLine(text, "assistant", "voice-assistant");
+      sealStreamLine("voice-assistant");
       assistantTranscriptBuffer = "";
       if (!state.agentWorking) setMode("listening");
     } else {
       if (text) transcript.textContent = text;
+      if (text) appendStreamLine(text, "user", "voice-user");
+      sealStreamLine("voice-user");
       userTranscriptBuffer = "";
       if (text) triggerCharacterAction("acknowledge");
     }
@@ -604,6 +680,7 @@ async function handle(message: Message) {
       setMode("working");
       setWorker("orchestrator", "Delegating to Codex");
     }
+    appendStreamLine(`开始：${describeEventItem(params)}`, "tool");
   } else if (method === "thread/realtime/error") {
     triggerCharacterAction("error");
     setMode("degraded");
@@ -611,6 +688,8 @@ async function handle(message: Message) {
     const detail = params?.message ?? "Codex Voice realtime error";
     $("#degraded-copy").textContent = detail;
     response.textContent = detail;
+    streamState.textContent = "ERROR";
+    appendStreamLine(String(detail), "error");
   } else if (method === "thread/realtime/closed") {
     cleanupPeer();
     updateVoiceInfo({
@@ -622,6 +701,8 @@ async function handle(message: Message) {
     });
     if (!state.manualStop) {
       setMode("ready");
+      streamState.textContent = "STANDBY";
+      appendStreamLine("Codex Voice 已结束，等待下一次唤醒", "system");
       response.textContent = "Codex Voice 已结束。再次说“嗨 Jarvis”即可唤醒。";
       await armWakeListener();
     }
@@ -630,11 +711,15 @@ async function handle(message: Message) {
     agentMessageBuffer = "";
     lastCompletedAgentText = "";
     state.agentWorking = true;
+    appendStreamLine("开始处理任务", "task");
     setMode("working"); setWorker("orchestrator", "Codex working");
   } else if (method === "item/agentMessage/delta") {
     const delta = typeof params?.delta === "string" ? params.delta : "";
     agentMessageBuffer += delta;
-    if (agentMessageBuffer) response.textContent = agentMessageBuffer;
+    if (agentMessageBuffer) {
+      response.textContent = agentMessageBuffer;
+      appendStreamLine(agentMessageBuffer, "assistant", "agent-message");
+    }
   } else if (method === "turn/completed") {
     state.agentWorking = false;
     if (!state.manualStop) triggerCharacterAction("complete", 1400);
@@ -643,6 +728,7 @@ async function handle(message: Message) {
     for (const role of ["developer", "researcher", "reviewer"]) {
       setWorker(role, state.manualStop ? "Interrupted" : "Standby", false);
     }
+    appendStreamLine(state.manualStop ? "任务已暂停" : "任务完成", state.manualStop ? "system" : "task");
     const completedText = (agentMessageBuffer.trim() || lastCompletedAgentText.trim()).trim();
     lastCompletedAgentText = "";
     if (!state.manualStop && completedText && !state.directVoice?.voiceActive) {
@@ -655,13 +741,19 @@ async function handle(message: Message) {
     }
   } else if (method === "item/started") {
     if (!state.manualStop) setWorker(roleOf(params), "Working");
+    appendStreamLine(`开始：${describeEventItem(params)}`, "tool");
   }
   else if (method === "item/completed") {
     setWorker(roleOf(params), "Complete", false);
+    appendStreamLine(`完成：${describeEventItem(params)}`, "tool");
     if (params?.item?.type === "agentMessage") {
       const text = extractAgentText(params.item).trim();
       if (text) lastCompletedAgentText = text;
-      if (text) response.textContent = text;
+      if (text) {
+        response.textContent = text;
+        appendStreamLine(text, "assistant", "agent-message");
+        sealStreamLine("agent-message");
+      }
     }
   }
 }
@@ -863,6 +955,7 @@ if (currentWindow) {
   });
   await listen<WakeEvent>("jarvis-wake", ({ payload }) => {
     transcript.textContent = "“嗨，Jarvis”";
+    appendStreamLine("收到唤醒词：嗨 Jarvis", "user");
     state.manualStop = false;
     state.speakerAccess = SPEAKER_GATE_ENABLED
       ? payload.speakerAccess ?? payload.speaker ?? "unknown"
@@ -893,6 +986,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   if (!text) return;
   state.manualStop = false;
   transcript.textContent = text;
+  appendStreamLine(`文字指令：${text}`, "user");
   input.value = "";
   if (!currentWindow) {
     response.textContent = "视觉预览：文字任务已切换为 Codex 工作态。";
@@ -953,12 +1047,14 @@ $("#stop").addEventListener("click", async () => {
     state.manualStop = false;
     state.agentWorking = false;
     setMode("ready");
+    appendStreamLine("正在恢复 Jarvis", "system");
     response.textContent = "正在恢复 Jarvis Voice…";
     try {
       await startDirectVoice({ coldStart: true });
       if (!state.directVoice?.voiceActive && !peer && state.mode !== "degraded") {
         await armWakeListener();
         response.textContent = "Jarvis 已恢复，等待唤醒词。";
+        appendStreamLine("Jarvis 已恢复", "system");
       }
     } catch (error) {
       setMode("degraded");
@@ -967,6 +1063,7 @@ $("#stop").addEventListener("click", async () => {
     return;
   }
   triggerCharacterAction("error", 700);
+  appendStreamLine("暂停当前任务", "system");
   state.manualStop = true; setMode("stopped");
   state.agentWorking = false;
   for (const role of ["orchestrator", "developer", "researcher", "reviewer"]) setWorker(role, "Interrupted", false);

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const frontend = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
@@ -56,6 +57,8 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(codexWrapper, /model=gpt-5\.6-sol/);
   assert.match(backend, /JARVIS_MODEL: &str = "gpt-5\.6-sol"/);
   assert.match(backend, /"model": JARVIS_MODEL/);
+  assert.match(backend, /use Codex's native file-change and command-execution tools directly/);
+  assert.match(backend, /do not open, click, type into, or inspect a desktop application with Computer Use for file manipulation/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -103,6 +106,20 @@ test("pause control can resume Jarvis and swaps to a play icon", () => {
   assert.match(frontend, /stopLabel\.textContent = paused \? "RESUME" : "PAUSE"/);
   assert.match(frontend, /stopped: \["PAUSED", "JARVIS PAUSED"\]/);
   assert.match(frontend, /play-mark/);
+});
+
+test("Jarvis renders a chronological SSE-style conversation stream", () => {
+  assert.match(frontend, /id="event-stream"/);
+  assert.match(frontend, /function appendStreamLine/);
+  assert.match(frontend, /thread\/realtime\/transcript\/delta/);
+  assert.match(frontend, /appendStreamLine\(assistantTranscriptBuffer, "assistant", "voice-assistant"\)/);
+  assert.match(frontend, /appendStreamLine\(`开始：\$\{describeEventItem\(params\)\}`/);
+  assert.match(frontend, /eventStream\.scrollTop = eventStream\.scrollHeight/);
+  assert.match(frontend, /streamLines\.findLast|for \(let index = streamLines\.length - 1/);
+  assert.match(frontend, /dialogue-current/);
+  assert.match(frontend, /\[transcript, response\][\s\S]*current\.scrollTop = current\.scrollHeight/);
+  assert.match(style, /\.dialogue-current p\{max-height:48px;overflow:auto/);
+  assert.match(style, /\.shell \.dialogue\{display:flex!important;flex-direction:column/);
 });
 
 test("production configuration persists workspace and resumes threads", () => {

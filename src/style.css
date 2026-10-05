@@ -79,8 +79,8 @@ html.visual-preview.transparency-grid,html.visual-preview.transparency-grid body
 /* Keep the controls and conversation readable during real use. */
 .topbar,.controls{opacity:1!important}
 .icon-button,.control,.command{pointer-events:auto!important}
-.shell .dialogue{display:block!important;left:24px;bottom:118px;width:420px;max-height:260px;overflow:auto;transform:none;opacity:1;background:rgba(2,13,18,.92);border:1px solid rgba(var(--rgb),.4);border-radius:16px;backdrop-filter:blur(16px)}
-.dialogue p{max-height:none;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
+.shell .dialogue{display:flex!important;flex-direction:column;left:24px;bottom:118px;width:420px;height:min(390px,calc(100% - 154px));max-height:calc(100% - 154px);overflow:hidden;transform:none;opacity:1;background:rgba(2,13,18,.92);border:1px solid rgba(var(--rgb),.4);border-radius:16px;backdrop-filter:blur(16px)}
+.dialogue-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;color:#7da8b8;letter-spacing:.18em;flex:0 0 auto}.dialogue-title small{font:9px Orbitron;color:var(--accent);letter-spacing:.12em}.event-stream{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;padding-right:5px;scroll-behavior:smooth;border-bottom:1px solid rgba(var(--rgb),.22)}.stream-line{display:grid;grid-template-columns:62px 1fr;gap:8px;padding:4px 0;font-size:11px;line-height:1.35;white-space:pre-wrap;overflow-wrap:anywhere}.stream-line time{color:#5c8896;font:9px Orbitron;letter-spacing:.04em}.stream-line span{color:#bdd6df}.stream-user span{color:#9dd8e8}.stream-assistant span{color:#e4faff}.stream-task span{color:#ffbd70}.stream-tool span{color:#e8c17d}.stream-error span{color:#ff8178}.stream-system span{color:#83c8dc}.dialogue-current{flex:0 0 auto;min-height:0;padding-top:9px}.dialogue-current p{max-height:48px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}
 .command{opacity:1;background:rgba(2,13,18,.92);width:min(50vw,640px)}
 .shell .status{display:flex!important;position:absolute;left:24px;top:24px;transform:none;padding:12px 16px;background:rgba(2,13,18,.92);border-radius:16px}
 dialog{z-index:50}

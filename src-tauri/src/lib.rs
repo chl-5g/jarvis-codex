@@ -834,7 +834,7 @@ async fn ensure_runtime(
         "approvalPolicy": profile.approval_policy,
         "sandbox": profile.sandbox,
         "baseInstructions": format!(
-            "You are Codex speaking through the local Jarvis interface. Keep voice replies concise and natural, execute real tasks with Codex tools when asked, report progress while work continues, and accept spoken corrections in the same thread. Do not say 'let me check', 'hold on', or imply that an action happened unless a real tool item has started; if no tool ran, say clearly that it has not been executed. {} {}",
+            "You are Codex speaking through the local Jarvis interface. Keep voice replies concise and natural, execute real tasks with Codex tools when asked, report progress while work continues, and accept spoken corrections in the same thread. For any request that reads, creates, edits, renames, searches, or otherwise manages files, source code, configuration, or documents, use Codex's native file-change and command-execution tools directly in the selected workspace first. Treat direct file edits and terminal commands as the normal path for project work; do not open, click, type into, or inspect a desktop application with Computer Use for file manipulation. Reserve Computer Use and desktop-control tools for tasks that explicitly require interacting with a visible GUI, window, browser, or other on-screen control. Do not say 'let me check', 'hold on', or imply that an action happened unless a real tool item has started; if no tool ran, say clearly that it has not been executed. {} {}",
             profile.instructions,
             speaker_access.instructions()
         )
