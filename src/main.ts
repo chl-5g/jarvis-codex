@@ -611,6 +611,9 @@ updateAudioMeters();
 function updateVoiceInfo(info: DirectVoice) {
   state.directVoice = info;
   mic.classList.toggle("active", info.voiceActive);
+  mic.setAttribute("aria-label", info.voiceActive ? "关闭语音" : "开启语音");
+  mic.querySelector("b")!.textContent = info.voiceActive ? "CLOSE VOICE" : "CODEX VOICE";
+  mic.querySelector("small")!.textContent = info.voiceActive ? "CLICK TO STOP" : "V3 WEBRTC · DIRECT";
   $("#voice-auth").textContent = info.codexConnected
     ? `${info.protocol} · ${info.voiceActive ? "connected" : info.phase}`
     : `${info.protocol} · standby`;
@@ -1053,8 +1056,13 @@ $("#command-form").addEventListener("submit", async (event) => {
   }
 });
 mic.addEventListener("click", () => {
-  if (state.directVoice?.voiceActive || peer) void stopDirectVoice();
-  else void startDirectVoice();
+  if (state.directVoice?.voiceActive || peer) {
+    void stopDirectVoice().catch((error) => {
+      response.textContent = `关闭语音失败：${String(error)}`;
+    });
+  } else {
+    void startDirectVoice();
+  }
 });
 $("#stop").addEventListener("click", async () => {
   if (state.mode === "stopped" || state.manualStop) {

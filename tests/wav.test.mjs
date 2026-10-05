@@ -116,6 +116,13 @@ test("text input button is labelled SEND", () => {
   assert.match(frontend, /<button>SEND<\/button>/);
 });
 
+test("voice button stops an active Voice session", () => {
+  assert.match(frontend, /mic\.addEventListener\("click"/);
+  assert.match(frontend, /state\.directVoice\?\.voiceActive \|\| peer/);
+  assert.match(frontend, /void stopDirectVoice\(\)/);
+  assert.match(frontend, /关闭语音/);
+});
+
 test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {
   assert.match(frontend, /await startDirectVoice\(\)/);
   assert.match(frontend, /await waitForVoiceActive\(\)/);
