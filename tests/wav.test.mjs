@@ -57,8 +57,8 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(codexWrapper, /model=gpt-5\.6-sol/);
   assert.match(backend, /JARVIS_MODEL: &str = "gpt-5\.6-sol"/);
   assert.match(backend, /"model": JARVIS_MODEL/);
-  assert.match(backend, /use Codex's native file-change and command-execution tools directly/);
-  assert.match(backend, /do not open, click, type into, or inspect a desktop application with Computer Use for file manipulation/);
+  assert.match(backend, /directly use Codex's native file-change and command-execution tools/);
+  assert.match(backend, /Do not route direct file edits through Obsidian or any other GUI/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -98,6 +98,14 @@ test("idle text input starts Codex Voice so replies keep the original Codex voic
   assert.match(frontend, /await startDirectVoice\(\)/);
   assert.match(frontend, /await waitForVoiceActive\(\)/);
   assert.match(frontend, /Codex Voice 尚未连接/);
+});
+
+test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
+  assert.match(frontend, /jarvis\.threadId:v2:/);
+  assert.match(backend, /HIGHEST PRIORITY FILE RULE/);
+  assert.match(backend, /paths under ~\/notes/);
+  assert.match(backend, /previous conversation preference to use Obsidian is superseded/);
+  assert.match(backend, /Do not route direct file edits through Obsidian/);
 });
 
 test("pause control can resume Jarvis and swaps to a play icon", () => {

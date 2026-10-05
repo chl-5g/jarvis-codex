@@ -45,7 +45,10 @@ const state = {
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
-const THREAD_KEY_PREFIX = "jarvis.threadId:";
+// Bump this when runtime instructions change materially. Older threads may
+// contain stale workflow preferences (for example, routing file edits through
+// Obsidian), so a new runtime policy must not inherit that conversation state.
+const THREAD_KEY_PREFIX = "jarvis.threadId:v2:";
 const PERMISSION_KEY = "jarvis.permissionMode";
 const permissionLabels: Record<PermissionMode, string> = {
   safe: "安全模式 · 需要时确认",
