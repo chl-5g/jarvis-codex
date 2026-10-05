@@ -29,6 +29,7 @@ type WakeEvent = {
 };
 type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
+const SPEAKER_GATE_ENABLED = false;
 
 const state = {
   mode: "booting" as Mode,
@@ -38,9 +39,9 @@ const state = {
   level: 0,
   manualStop: false,
   agentWorking: false,
-  // Until a local voiceprint verifier positively identifies Allen, ordinary
-  // answers remain available but Computer Use is denied.
-  speakerAccess: "unknown" as SpeakerAccess,
+  // This is a single-user local deployment. Keep Computer Use available
+  // without waiting for the optional voiceprint verifier.
+  speakerAccess: "allen" as SpeakerAccess,
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
@@ -53,7 +54,7 @@ const permissionLabels: Record<PermissionMode, string> = {
 };
 function storedPermissionMode(): PermissionMode {
   const value = localStorage.getItem(PERMISSION_KEY);
-  return value === "safe" || value === "full" ? value : "auto";
+  return value === "safe" ? "safe" : "full";
 }
 let workspace = "";
 let permissionMode = storedPermissionMode();
@@ -142,7 +143,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Speaker gate</dt><dd id="speaker-auth">未识别：仅回答，不控制电脑</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -214,7 +215,9 @@ function setWorker(role: string, label: string, active = true) {
   card.classList.toggle("active", active); card.querySelector("small")!.textContent = label;
 }
 function updateSpeakerAccess(access: SpeakerAccess) {
-  const label = access === "allen"
+  const label = !SPEAKER_GATE_ENABLED
+    ? "已开放：完全访问"
+    : access === "allen"
     ? "Allen：允许 Computer Use"
     : access === "rejected"
       ? "未识别：任务已拒绝"
@@ -721,7 +724,7 @@ async function acquireMicrophone(coldStart: boolean) {
 }
 
 async function startDirectVoice({ coldStart = false } = {}) {
-  if (state.speakerAccess === "rejected") {
+  if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
     setMode("ready");
@@ -850,9 +853,11 @@ if (currentWindow) {
   await listen<WakeEvent>("jarvis-wake", ({ payload }) => {
     transcript.textContent = "“嗨，Jarvis”";
     state.manualStop = false;
-    state.speakerAccess = payload.speakerAccess ?? payload.speaker ?? "unknown";
+    state.speakerAccess = SPEAKER_GATE_ENABLED
+      ? payload.speakerAccess ?? payload.speaker ?? "unknown"
+      : "allen";
     updateSpeakerAccess(state.speakerAccess);
-    if (state.speakerAccess === "rejected") {
+    if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
       const message = "未识别的说话人";
       setMode("ready");
       banner.hidden = true;
@@ -888,7 +893,7 @@ $("#command-form").addEventListener("submit", async (event) => {
     await invoke("append_codex_voice_text", { text });
     return;
   }
-  if (state.speakerAccess === "rejected") {
+  if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
     setMode("ready");

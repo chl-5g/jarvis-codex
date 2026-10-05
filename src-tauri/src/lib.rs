@@ -123,10 +123,28 @@ impl Default for SpeakerAccess {
     }
 }
 
+/// The local single-user deployment keeps the speaker gate off by default so
+/// it cannot block Computer Use before the microphone verifier is integrated.
+/// Set JARVIS_SPEAKER_GATE=1 to opt back into fail-closed verification.
+fn speaker_gate_enabled() -> bool {
+    matches!(
+        std::env::var("JARVIS_SPEAKER_GATE").as_deref(),
+        Ok("1") | Ok("true") | Ok("yes")
+    )
+}
+
+fn effective_speaker_access(requested: SpeakerAccess) -> SpeakerAccess {
+    if speaker_gate_enabled() {
+        requested
+    } else {
+        SpeakerAccess::Allen
+    }
+}
+
 impl SpeakerAccess {
     fn instructions(self) -> &'static str {
         match self {
-            Self::Allen => "The local speaker verifier identified the user as Allen. Computer Use and desktop-control tools are allowed under the selected Codex permission mode.",
+            Self::Allen => "Speaker verification is disabled for this single-user local Jarvis deployment. Treat the current operator as authorized and use Computer Use and desktop-control tools under the selected Codex permission mode when requested.",
             Self::Unknown => "The local speaker verifier did not identify the speaker. Answer ordinary questions normally, but do not use Computer Use, desktop-control, screen-control, or other interactive UI tools. Explain that speaker verification is required before computer control.",
             Self::Rejected => "The local speaker verifier rejected the speaker. Do not execute or send the requested task; respond with exactly: 未识别的说话人",
         }
@@ -224,6 +242,7 @@ impl CodexRuntime {
         speaker_access: SpeakerAccess,
         workspace: String,
     ) -> Result<Arc<Self>, String> {
+        let speaker_access = effective_speaker_access(speaker_access);
         let codex_binary = codex_binary_path(&app)?;
         let mut command = Command::new(&codex_binary);
         command
@@ -647,7 +666,7 @@ fn start_wake_supervisor(app: AppHandle) {
             // The WebView owns the RTCPeerConnection, so wake only raises the
             // Jarvis surface and asks the renderer to begin the official Codex
             // app-server V3 Voice handshake. No keypress or UI automation.
-            let speaker_access = match wake_speaker_access {
+            let speaker_access = match effective_speaker_access(wake_speaker_access) {
                 SpeakerAccess::Allen => "allen",
                 SpeakerAccess::Rejected => "rejected",
                 SpeakerAccess::Unknown => "unknown",
@@ -788,6 +807,7 @@ async fn ensure_runtime(
     permission_mode: PermissionMode,
     speaker_access: SpeakerAccess,
 ) -> Result<Arc<CodexRuntime>, String> {
+    let speaker_access = effective_speaker_access(speaker_access);
     let cwd = validated_workspace(cwd)?;
     let existing = { state.runtime.lock().await.clone() };
     if let Some(existing) = existing {
@@ -852,6 +872,7 @@ async fn start_jarvis(
     permission_mode: PermissionMode,
     speaker_access: SpeakerAccess,
 ) -> Result<SessionInfo, String> {
+    let speaker_access = effective_speaker_access(speaker_access);
     if speaker_access == SpeakerAccess::Rejected {
         return Err("未识别的说话人".to_owned());
     }
@@ -883,6 +904,7 @@ async fn start_codex_voice(
     if !sdp.starts_with("v=0") {
         return Err("WebRTC SDP offer 无效".to_owned());
     }
+    let speaker_access = effective_speaker_access(speaker_access);
     if speaker_access == SpeakerAccess::Rejected {
         return Err("未识别的说话人".to_owned());
     }
@@ -974,7 +996,7 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
 
 #[tauri::command]
 async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), String> {
-    let speaker_access = *state.speaker_access.read().await;
+    let speaker_access = effective_speaker_access(*state.speaker_access.read().await);
     if speaker_access == SpeakerAccess::Rejected {
         return Err("未识别的说话人".to_owned());
     }
@@ -1139,7 +1161,7 @@ pub fn run() {
         .manage(AppState {
             runtime: Mutex::new(None),
             speech: Mutex::new(None),
-            speaker_access: RwLock::new(SpeakerAccess::Unknown),
+            speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
             wake_enabled: AtomicBool::new(false),

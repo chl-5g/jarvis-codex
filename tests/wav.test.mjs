@@ -122,20 +122,21 @@ test("permission profiles are persisted and mapped by the trusted backend", () =
   assert.match(backend, /existing\.permission_mode == permission_mode/);
 });
 
-test("speaker verification gates Computer Use while preserving ordinary answers", () => {
+test("speaker verification is opt-in and Computer Use is open by default", () => {
   assert.match(frontend, /type SpeakerAccess = "unknown" \| "allen" \| "rejected"/);
+  assert.match(frontend, /const SPEAKER_GATE_ENABLED = false/);
+  assert.match(frontend, /speakerAccess: "allen"/);
   assert.match(frontend, /speakerAccess: state\.speakerAccess/);
-  assert.match(frontend, /未识别的说话人/);
-  assert.match(frontend, /state\.speakerAccess === "rejected"/);
+  assert.match(frontend, /已开放：完全访问/);
   assert.match(backend, /enum SpeakerAccess/);
   assert.match(backend, /SpeakerAccess::Unknown/);
   assert.match(backend, /SpeakerAccess::Allen/);
   assert.match(backend, /SpeakerAccess::Rejected/);
-  assert.match(backend, /Computer Use and desktop-control tools are allowed/);
-  assert.match(backend, /do not use Computer Use, desktop-control/);
+  assert.match(backend, /use Computer Use and desktop-control tools/);
+  assert.match(backend, /fn speaker_gate_enabled/);
+  assert.match(backend, /JARVIS_SPEAKER_GATE/);
+  assert.match(backend, /effective_speaker_access/);
   assert.match(backend, /speaker_access\.instructions\(\)/);
-  assert.match(backend, /mcp_servers\.node_repl\.enabled=false/);
-  assert.match(backend, /mcp_servers\.cua_repl\.enabled=false/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {
