@@ -312,9 +312,15 @@ test("future device bridge is disabled by default and loopback-token protected",
   assert.match(backend, /bridge_status/);
   assert.match(backend, /bridge_enable/);
   assert.match(bridgeBackend, /127\.0\.0\.1/);
+  assert.match(bridgeBackend, /POST.*\/command|\("POST", "\/command"\)/s);
+  assert.match(bridgeBackend, /MAX_COMMAND_CHARS/);
+  assert.match(bridgeBackend, /validate_bind_address/);
   assert.match(bridgeBackend, /pairing token/);
   assert.match(bridgeBackend, /Authorization/);
   assert.match(bridgeBackend, /MAX_EVENTS/);
+  assert.match(frontend, /id="bridge-enable"/);
+  assert.match(frontend, /bridge_enable/);
+  assert.match(frontend, /jarvis\.bridgeToken:v1/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {

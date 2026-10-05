@@ -5,6 +5,12 @@ src-tauri/gen/
 src-tauri/wake-helper/JarvisWakeListener.app/
 runtime/*
 !runtime/.gitkeep
+models/
+recordings/
+settings.json
+Jarvis Codex.app/
+Jarvis Codex.app.previous-*/
+Jarvis Codex_*.dmg
 .DS_Store
 *.log
 .env

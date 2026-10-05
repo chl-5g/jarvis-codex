@@ -1167,8 +1167,20 @@ fn bridge_status() -> bridge::BridgeStatus {
 }
 
 #[tauri::command]
-fn bridge_enable(pairing_token: Option<String>) -> Result<bridge::BridgeEnableResult, String> {
-    let result = bridge::enable(pairing_token)?;
+async fn bridge_enable(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pairing_token: Option<String>,
+    bind_address: Option<String>,
+) -> Result<bridge::BridgeEnableResult, String> {
+    let workspace = state
+        .runtime
+        .lock()
+        .await
+        .as_ref()
+        .map(|runtime| runtime.workspace.clone())
+        .unwrap_or(default_workspace()?);
+    let result = bridge::enable(app, PathBuf::from(workspace), pairing_token, bind_address)?;
     bridge::publish(
         "bridge.enabled",
         serde_json::to_value(&result.status).unwrap_or_else(|_| json!({})),

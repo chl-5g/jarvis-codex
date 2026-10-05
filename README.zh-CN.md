@@ -96,6 +96,13 @@ Swift 唤醒 helper 与 Voice 会话不会同时采集麦克风。运行时、�
 Voice 暂时不可用时，可以使用底部文字输入框。语音和文字都会进入当前工作目录所
 对应的线程。
 
+## 项目目录
+
+`~/Jarvis-codex` 是唯一的本地项目目录。源代码、旧版 Python 控制器、确认桥、启动
+脚本和项目 TODO 都集中在这里。应用构建包、下载的语音模型、录音和运行时状态也放
+在这个目录下，但由 Git 忽略。旧的 `outputs/Jarvis` 暂存目录及其中的重复源码已经
+迁移并清理。
+
 ## 断网运行：本地 Qwen 与 Agent 工具层
 
 Jarvis 现在有一条完全本地的文字任务路径。设置中的“本地 Qwen”会请求本机
@@ -141,6 +148,22 @@ curl -fsS http://127.0.0.1:8080/v1/models
 记忆、知识库和打包的 Kokoro 语音不需要互联网；Codex 原生 Voice/WebRTC 仍需要网络，
 断网时应使用本地 Qwen 路由。工具、Qwen、Codex、工作流和任务事件会统一发布到本地
 `jarvis-event` 流，便于界面和本机适配器观察执行进度。
+
+## iPhone / 快捷指令桥
+
+设置里的“iPhone / Shortcuts 本地桥”默认关闭。启用后，桥接层提供两个带 Bearer
+token 的本地 HTTP 接口：
+
+```text
+POST /command   {"text":"读取 ~/notes/MEMORY.md"}
+GET  /events    查看执行进度和最终答案
+```
+
+默认只绑定 `127.0.0.1`。如果要让同一 Wi-Fi 下的 iPhone 访问，把监听地址改成
+Mac 的私有地址或 `0.0.0.0`，复制首次启用时显示的 token 到快捷指令的
+`Authorization: Bearer <token>` 请求头。桥接命令始终进入本地 Qwen 的受限工具链，
+不开放删除、网络下载、权限修改或任意 Shell；关闭 Jarvis 或点击“关闭本地桥”后，
+端口立即停止监听。不要把端口转发到公网。
 
 ## 权限模式
 

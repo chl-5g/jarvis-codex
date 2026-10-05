@@ -104,6 +104,15 @@ trust boundaries.
 If Voice is unavailable, use the text field at the bottom. Voice and text use
 the thread associated with the current workspace.
 
+## Project layout
+
+`~/Jarvis-codex` is the single local project directory. Source code, the legacy
+Python controller, the confirmation bridge, the launcher, and project notes all
+live there. Built app bundles, downloaded speech models, recordings, and runtime
+state are kept under the same directory and ignored by Git. The old
+`outputs/Jarvis` staging directory and its duplicate source files have been
+removed.
+
 ## Offline local Qwen and the Agent tool layer
 
 Jarvis includes a fully local text path. Select `Local Qwen` in Settings to use
@@ -147,6 +156,25 @@ bundled Kokoro speech fallback continue to work offline. Codex native
 Voice/WebRTC still requires network access, so use the Local Qwen route while
 offline. Tool, Qwen, Codex, workflow, and task activity is published through
 the unified local `jarvis-event` stream.
+
+## iPhone and Shortcuts bridge
+
+The `iPhone / Shortcuts local bridge` is disabled by default in Settings. When
+enabled, it exposes two bearer-token protected local HTTP endpoints:
+
+```text
+POST /command   {"text":"Read ~/notes/MEMORY.md"}
+GET  /events    execution progress and final answers
+```
+
+The default bind address is `127.0.0.1`. To reach Jarvis from an iPhone on the
+same Wi-Fi, choose the Mac's private address or `0.0.0.0` in the bridge setting,
+then copy the one-time pairing token into the Shortcut's
+`Authorization: Bearer <token>` header. Bridge commands always use the local
+Qwen restricted tool path; deletion, network downloads, permission changes,
+and arbitrary shell composition remain unavailable. The listener stops when
+Jarvis exits or the bridge is disabled. Do not port-forward it to the public
+internet.
 
 ## Permission profiles
 

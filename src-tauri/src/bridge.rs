@@ -6,12 +6,13 @@
 //! keeps the first cross-device seam auditable without exposing the process to
 //! a LAN interface or adding a second always-on server.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
     collections::VecDeque,
     io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{IpAddr, TcpListener, TcpStream},
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, OnceLock,
@@ -19,9 +20,12 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tauri::AppHandle;
 
 const DEFAULT_PORT: u16 = 8788;
 const MAX_EVENTS: usize = 100;
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+const MAX_COMMAND_CHARS: usize = 4_000;
 
 #[derive(Clone, Serialize, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -51,26 +55,41 @@ struct BridgeEvent {
     payload: serde_json::Value,
 }
 
+#[derive(Clone)]
+struct BridgeRuntime {
+    app: AppHandle,
+    workspace: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct CommandRequest {
+    text: String,
+}
+
 struct BridgeState {
     enabled: bool,
+    bind_address: String,
     token: Option<String>,
     port: Option<u16>,
     next_event_id: u64,
     events: VecDeque<BridgeEvent>,
     stop: Option<Arc<AtomicBool>>,
     listener: Option<JoinHandle<()>>,
+    runtime: Option<BridgeRuntime>,
 }
 
 impl Default for BridgeState {
     fn default() -> Self {
         Self {
             enabled: false,
+            bind_address: "127.0.0.1".to_owned(),
             token: None,
             port: None,
             next_event_id: 1,
             events: VecDeque::new(),
             stop: None,
             listener: None,
+            runtime: None,
         }
     }
 }
@@ -89,6 +108,40 @@ fn configured_port() -> u16 {
         .and_then(|value| value.parse::<u16>().ok())
         .filter(|port| *port != 0)
         .unwrap_or(DEFAULT_PORT)
+}
+
+fn configured_bind_address() -> String {
+    std::env::var("JARVIS_BRIDGE_BIND").unwrap_or_else(|_| "127.0.0.1".to_owned())
+}
+
+fn validate_bind_address(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    let address = value
+        .parse::<IpAddr>()
+        .map_err(|_| "bridge bind address must be an IP address".to_owned())?;
+    let allowed = match address {
+        IpAddr::V4(ip) => ip.is_unspecified() || ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_unspecified() || ip.is_loopback() || ip.is_unique_local(),
+    };
+    if !allowed {
+        return Err("bridge bind address must be loopback, private, or unspecified".to_owned());
+    }
+    Ok(address.to_string())
+}
+
+fn parse_command_body(body: &[u8]) -> Result<CommandRequest, String> {
+    let request: CommandRequest =
+        serde_json::from_slice(body).map_err(|error| format!("invalid command body: {error}"))?;
+    let text = request.text.trim().to_owned();
+    if text.is_empty() {
+        return Err("command text cannot be empty".to_owned());
+    }
+    if text.chars().count() > MAX_COMMAND_CHARS {
+        return Err(format!(
+            "command text exceeds {MAX_COMMAND_CHARS} characters"
+        ));
+    }
+    Ok(CommandRequest { text })
 }
 
 fn token() -> String {
@@ -112,7 +165,7 @@ fn token() -> String {
 fn status_locked(state: &BridgeState) -> BridgeStatus {
     BridgeStatus {
         enabled: state.enabled,
-        bind_address: "127.0.0.1".to_owned(),
+        bind_address: state.bind_address.clone(),
         port: state.port,
         paired: state.token.is_some(),
         endpoint: state.port.map(|port| format!("http://127.0.0.1:{port}")),
@@ -126,8 +179,19 @@ pub fn status() -> BridgeStatus {
 /// Enable the endpoint.  The first call creates a token.  Later calls must
 /// provide the same token, preventing an accidental second local client from
 /// silently replacing the pairing credential.
-pub fn enable(requested_token: Option<String>) -> Result<BridgeEnableResult, String> {
+pub fn enable(
+    app: AppHandle,
+    workspace: PathBuf,
+    requested_token: Option<String>,
+    requested_bind_address: Option<String>,
+) -> Result<BridgeEnableResult, String> {
     let store = state();
+    let configured_bind = configured_bind_address();
+    let bind_raw = requested_bind_address
+        .as_deref()
+        .unwrap_or(configured_bind.as_str());
+    let bind_address = validate_bind_address(bind_raw)?;
+    let runtime = BridgeRuntime { app, workspace };
     let mut guard = store
         .lock()
         .map_err(|_| "bridge state unavailable".to_owned())?;
@@ -135,6 +199,7 @@ pub fn enable(requested_token: Option<String>) -> Result<BridgeEnableResult, Str
         if guard.token.as_deref() != requested_token.as_deref() {
             return Err("bridge is already enabled; pairing token does not match".to_owned());
         }
+        guard.runtime = Some(runtime);
         return Ok(BridgeEnableResult {
             status: status_locked(&guard),
             pairing_token: None,
@@ -156,7 +221,7 @@ pub fn enable(requested_token: Option<String>) -> Result<BridgeEnableResult, Str
         }
         (None, None) => (token(), true),
     };
-    let listener = TcpListener::bind(("127.0.0.1", configured_port()))
+    let listener = TcpListener::bind((bind_address.as_str(), configured_port()))
         .map_err(|error| format!("cannot bind localhost bridge: {error}"))?;
     listener
         .set_nonblocking(true)
@@ -168,8 +233,10 @@ pub fn enable(requested_token: Option<String>) -> Result<BridgeEnableResult, Str
     let stop = Arc::new(AtomicBool::new(false));
     guard.token = Some(pairing_token.clone());
     guard.port = Some(port);
+    guard.bind_address = bind_address;
     guard.enabled = true;
     guard.stop = Some(stop.clone());
+    guard.runtime = Some(runtime);
     let worker_store = store.clone();
     guard.listener = Some(thread::spawn(move || serve(listener, worker_store, stop)));
     Ok(BridgeEnableResult {
@@ -189,6 +256,7 @@ pub fn disable(requested_token: Option<String>) -> Result<BridgeStatus, String> 
         }
         guard.enabled = false;
         guard.port = None;
+        guard.runtime = None;
         (guard.stop.take(), guard.listener.take())
     };
     if let Some(stop) = stop {
@@ -233,15 +301,70 @@ fn serve(listener: TcpListener, store: Arc<Mutex<BridgeState>>, stop: Arc<Atomic
     }
 }
 
+fn read_request(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
+    let mut buffer = Vec::with_capacity(8_192);
+    let mut header_end = None;
+    while header_end.is_none() {
+        let mut chunk = [0u8; 8_192];
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| format!("request read failed: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+        if buffer.len() > MAX_REQUEST_BYTES {
+            return Err("request too large".to_owned());
+        }
+        header_end = buffer.windows(4).position(|window| window == b"\r\n\r\n");
+    }
+    let header_end = header_end.ok_or("request headers are incomplete")?;
+    let header_length = header_end + 4;
+    let headers = String::from_utf8_lossy(&buffer[..header_end]);
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
+        })
+        .unwrap_or(0);
+    let total = header_length
+        .checked_add(content_length)
+        .ok_or("request length overflow")?;
+    if total > MAX_REQUEST_BYTES {
+        return Err("request too large".to_owned());
+    }
+    while buffer.len() < total {
+        let mut chunk = [0u8; 8_192];
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| format!("request body read failed: {error}"))?;
+        if read == 0 {
+            return Err("request body is incomplete".to_owned());
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+    buffer.truncate(total);
+    Ok(buffer)
+}
+
 fn handle(mut stream: TcpStream, store: &Arc<Mutex<BridgeState>>) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-    let mut buffer = [0u8; 8192];
-    let size = match stream.read(&mut buffer) {
-        Ok(size) => size,
-        Err(_) => return,
+    let request = match read_request(&mut stream) {
+        Ok(request) => request,
+        Err(error) => {
+            respond(&mut stream, 400, json!({"error": error}));
+            return;
+        }
     };
-    let request = String::from_utf8_lossy(&buffer[..size]);
-    let mut lines = request.lines();
+    let request = String::from_utf8_lossy(&request);
+    let (headers, body) = request
+        .split_once("\r\n\r\n")
+        .unwrap_or((request.as_ref(), ""));
+    let mut lines = headers.lines();
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
@@ -253,37 +376,83 @@ fn handle(mut stream: TcpStream, store: &Arc<Mutex<BridgeState>>) {
         })
         .map(str::trim)
         .and_then(|value| value.strip_prefix("Bearer "));
-    let authorized = store
+    let (authorized, runtime) = store
         .lock()
         .ok()
-        .and_then(|guard| guard.token.clone())
-        .as_deref()
-        .zip(auth)
-        .map(|(expected, actual)| expected == actual)
-        .unwrap_or(false);
-    if method != "GET" || !authorized {
+        .map(|guard| {
+            let authorized = guard
+                .token
+                .as_deref()
+                .zip(auth)
+                .map(|(expected, actual)| expected == actual)
+                .unwrap_or(false);
+            (authorized, guard.runtime.clone())
+        })
+        .unwrap_or((false, None));
+    if !authorized {
         respond(&mut stream, 401, json!({"error":"unauthorized"}));
         return;
     }
-    let body = match path.split('?').next().unwrap_or(path) {
-        "/status" => serde_json::to_value(status()).unwrap_or_else(|_| json!({"enabled":false})),
-        "/events" => store
-            .lock()
-            .map(|guard| json!({"events": guard.events.iter().cloned().collect::<Vec<_>>() }))
-            .unwrap_or_else(|_| json!({"events":[]})),
-        _ => {
-            respond(&mut stream, 404, json!({"error":"not found"}));
-            return;
-        }
+    let route = path.split('?').next().unwrap_or(path);
+    let response = match (method, route) {
+        ("GET", "/status") => (
+            200,
+            serde_json::to_value(status()).unwrap_or_else(|_| json!({"enabled":false})),
+        ),
+        ("GET", "/events") => (
+            200,
+            store
+                .lock()
+                .map(|guard| json!({"events": guard.events.iter().cloned().collect::<Vec<_>>() }))
+                .unwrap_or_else(|_| json!({"events":[]})),
+        ),
+        ("POST", "/command") => match parse_command_body(body.as_bytes()) {
+            Ok(command) => match runtime {
+                Some(runtime) => {
+                    let request_id = start_command(runtime, command);
+                    (202, json!({"accepted":true,"requestId":request_id}))
+                }
+                None => (503, json!({"error":"bridge runtime is not ready"})),
+            },
+            Err(error) => (400, json!({"error": error})),
+        },
+        _ => (404, json!({"error":"not found"})),
     };
-    respond(&mut stream, 200, body);
+    respond(&mut stream, response.0, response.1);
+}
+
+fn start_command(runtime: BridgeRuntime, command: CommandRequest) -> String {
+    let request_id = format!("bridge-{}", token());
+    let started_id = request_id.clone();
+    let event_id = request_id.clone();
+    publish(
+        "bridge",
+        json!({"kind":"bridge","phase":"started","requestId":started_id,"text":command.text}),
+    );
+    tauri::async_runtime::spawn(async move {
+        let result = crate::qwen::chat(runtime.app, command.text, runtime.workspace).await;
+        match result {
+            Ok(answer) => publish(
+                "bridge",
+                json!({"kind":"bridge","phase":"completed","requestId":event_id,"answer":answer}),
+            ),
+            Err(error) => publish(
+                "bridge",
+                json!({"kind":"bridge","phase":"error","requestId":event_id,"error":error}),
+            ),
+        }
+    });
+    request_id
 }
 
 fn respond(stream: &mut TcpStream, code: u16, body: serde_json::Value) {
     let body = serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned());
     let reason = match code {
         200 => "OK",
+        202 => "Accepted",
         404 => "Not Found",
+        503 => "Service Unavailable",
+        400 => "Bad Request",
         _ => "Unauthorized",
     };
     let response = format!(
@@ -296,6 +465,31 @@ fn respond(stream: &mut TcpStream, code: u16, body: serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_address_accepts_loopback_private_and_unspecified_only() {
+        assert_eq!(validate_bind_address("127.0.0.1").unwrap(), "127.0.0.1");
+        assert_eq!(
+            validate_bind_address("192.168.1.20").unwrap(),
+            "192.168.1.20"
+        );
+        assert_eq!(validate_bind_address("0.0.0.0").unwrap(), "0.0.0.0");
+        assert!(validate_bind_address("8.8.8.8").is_err());
+        assert!(validate_bind_address("not-an-ip").is_err());
+    }
+
+    #[test]
+    fn command_body_requires_bounded_text() {
+        let request = parse_command_body(br#"{"text":"read MEMORY.md"}"#).unwrap();
+        assert_eq!(request.text, "read MEMORY.md");
+        assert!(parse_command_body(br#"{"text":"  "}"#).is_err());
+        assert!(parse_command_body(
+            serde_json::to_vec(&json!({"text": "x".repeat(MAX_COMMAND_CHARS + 1)}))
+                .unwrap()
+                .as_slice()
+        )
+        .is_err());
+    }
 
     #[test]
     fn status_is_disabled_and_loopback_only_by_default() {
