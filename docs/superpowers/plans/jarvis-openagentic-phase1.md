@@ -76,6 +76,6 @@
 
 - [x] Run the full Jarvis test suite, web build, Rust format/check/test, and production Tauri build.
 - [x] Verify `127.0.0.1:8080/v1/models` and a Qwen completion locally.
-- [ ] Deploy the built app to the existing local Jarvis output without GitHub push.
-- [ ] Restart Jarvis once (explicitly authorized by the user) and verify the process and local mode UI.
-- [ ] Record the completed phase and any deferred phase-2 capabilities.
+- [x] Deploy the built app to the existing local Jarvis output without GitHub push.
+- [x] Restart Jarvis once (explicitly authorized by the user) and verify the process and local mode UI.
+- [x] Record the completed phase and any deferred phase-2 capabilities.
