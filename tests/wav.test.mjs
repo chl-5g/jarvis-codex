@@ -121,6 +121,8 @@ test("voice button stops an active Voice session", () => {
   assert.match(frontend, /state\.directVoice\?\.voiceActive \|\| peer/);
   assert.match(frontend, /void stopDirectVoice\(\)/);
   assert.match(frontend, /关闭语音/);
+  assert.match(frontend, /class="slash-mark"/);
+  assert.match(style, /\.mic \.slash-mark/);
 });
 
 test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {

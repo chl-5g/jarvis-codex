@@ -611,6 +611,9 @@ updateAudioMeters();
 function updateVoiceInfo(info: DirectVoice) {
   state.directVoice = info;
   mic.classList.toggle("active", info.voiceActive);
+  mic.querySelector("span")!.innerHTML = info.voiceActive
+    ? '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg>'
+    : '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path><path class="slash-mark" d="M4 4 20 20"></path></svg>';
   mic.setAttribute("aria-label", info.voiceActive ? "关闭语音" : "开启语音");
   mic.querySelector("b")!.textContent = info.voiceActive ? "CLOSE VOICE" : "CODEX VOICE";
   mic.querySelector("small")!.textContent = info.voiceActive ? "CLICK TO STOP" : "V3 WEBRTC · DIRECT";
