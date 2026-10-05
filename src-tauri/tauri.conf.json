@@ -42,7 +42,9 @@
     "category": "DeveloperTool",
     "shortDescription": "Wake Jarvis and work through Codex",
     "resources": [
-      "wake-helper/JarvisWakeListener.app/"
+      "wake-helper/JarvisWakeListener.app/",
+      "codex",
+      "local_tts.py"
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",

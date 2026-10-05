@@ -23,8 +23,12 @@ type WakeEvent = {
   ok: boolean;
   error?: string;
   cold?: boolean;
+  /** Set by the local speaker verifier when one is installed. */
+  speaker?: SpeakerAccess;
+  speakerAccess?: SpeakerAccess;
 };
 type PermissionMode = "safe" | "auto" | "full";
+type SpeakerAccess = "unknown" | "allen" | "rejected";
 
 const state = {
   mode: "booting" as Mode,
@@ -34,6 +38,9 @@ const state = {
   level: 0,
   manualStop: false,
   agentWorking: false,
+  // Until a local voiceprint verifier positively identifies Allen, ordinary
+  // answers remain available but Computer Use is denied.
+  speakerAccess: "unknown" as SpeakerAccess,
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
@@ -60,10 +67,23 @@ let remoteAnalyser: AnalyserNode | null = null;
 let userTranscriptBuffer = "";
 let assistantTranscriptBuffer = "";
 let agentMessageBuffer = "";
+let lastCompletedAgentText = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
+
+function extractAgentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  if (Array.isArray(value)) return value.map(extractAgentText).filter(Boolean).join("\n");
+  const record = value as Record<string, unknown>;
+  for (const key of ["text", "transcript", "output_text", "message", "content", "parts"]) {
+    const text = extractAgentText(record[key]);
+    if (text) return text;
+  }
+  return "";
+}
 const previewParams = new URLSearchParams(window.location.search);
 const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
 const currentWindow = typeof tauriInternals?.invoke === "function" ? getCurrentWindow() : null;
@@ -122,7 +142,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Speaker gate</dt><dd id="speaker-auth">未识别：仅回答，不控制电脑</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -192,6 +212,14 @@ function setWorker(role: string, label: string, active = true) {
   const card = document.querySelector<HTMLElement>(`.worker[data-role="${role}"]`);
   if (!card) return;
   card.classList.toggle("active", active); card.querySelector("small")!.textContent = label;
+}
+function updateSpeakerAccess(access: SpeakerAccess) {
+  const label = access === "allen"
+    ? "Allen：允许 Computer Use"
+    : access === "rejected"
+      ? "未识别：任务已拒绝"
+      : "未识别：仅回答，不控制电脑";
+  $("#speaker-auth").textContent = label;
 }
 function roleOf(params: any) {
   const text = JSON.stringify(params ?? {}).toLowerCase();
@@ -586,6 +614,7 @@ async function handle(message: Message) {
   } else if (method === "turn/started") {
     if (state.manualStop) return;
     agentMessageBuffer = "";
+    lastCompletedAgentText = "";
     state.agentWorking = true;
     setMode("working"); setWorker("orchestrator", "Codex working");
   } else if (method === "item/agentMessage/delta") {
@@ -600,13 +629,24 @@ async function handle(message: Message) {
     for (const role of ["developer", "researcher", "reviewer"]) {
       setWorker(role, state.manualStop ? "Interrupted" : "Standby", false);
     }
+    const completedText = (agentMessageBuffer.trim() || lastCompletedAgentText.trim()).trim();
+    lastCompletedAgentText = "";
+    if (!state.manualStop && completedText && !state.directVoice?.voiceActive) {
+      setMode("speaking");
+      void invoke("speak_text", { text: completedText }).catch((error) => {
+        response.textContent = `本机语音失败：${String(error)}`;
+      }).finally(() => {
+        if (!state.directVoice?.voiceActive && state.mode === "speaking") setMode("ready");
+      });
+    }
   } else if (method === "item/started") {
     if (!state.manualStop) setWorker(roleOf(params), "Working");
   }
   else if (method === "item/completed") {
     setWorker(roleOf(params), "Complete", false);
     if (params?.item?.type === "agentMessage") {
-      const text = typeof params.item.text === "string" ? params.item.text : agentMessageBuffer;
+      const text = extractAgentText(params.item).trim();
+      if (text) lastCompletedAgentText = text;
       if (text) response.textContent = text;
     }
   }
@@ -681,6 +721,13 @@ async function acquireMicrophone(coldStart: boolean) {
 }
 
 async function startDirectVoice({ coldStart = false } = {}) {
+  if (state.speakerAccess === "rejected") {
+    const message = "未识别的说话人";
+    response.textContent = message;
+    setMode("ready");
+    void invoke("speak_text", { text: message }).catch(() => undefined);
+    return;
+  }
   if (!currentWindow) {
     setMode("voice-starting");
     window.setTimeout(() => setMode("listening"), FORMATION_DURATION);
@@ -721,7 +768,9 @@ async function startDirectVoice({ coldStart = false } = {}) {
       voiceAudio.srcObject = remoteStream;
       attachAnalyser(remoteStream, "remote");
       void audioContext?.resume();
-      void voiceAudio.play();
+      void voiceAudio.play().catch((error) => {
+        response.textContent = `Codex Voice 音频播放失败：${String(error)}`;
+      });
     };
     connection.onconnectionstatechange = () => {
       if (connection.connectionState === "failed") {
@@ -739,12 +788,14 @@ async function startDirectVoice({ coldStart = false } = {}) {
       cwd: workspace,
       threadId: savedThreadId(),
       permissionMode,
+      speakerAccess: state.speakerAccess,
       sdp,
       voice: "cove",
     });
     updateVoiceInfo(info);
   } catch (error) {
     cleanupPeer();
+    state.directVoice = null;
     recoverableColdStartError = coldStart && isNotAllowedError(error);
     setMode("degraded");
     banner.hidden = false;
@@ -753,6 +804,16 @@ async function startDirectVoice({ coldStart = false } = {}) {
     await armWakeListener();
   } finally {
     voiceStartInFlight = false;
+  }
+}
+
+async function waitForVoiceActive(timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  while (!state.directVoice?.voiceActive) {
+    if (state.mode === "degraded" || Date.now() >= deadline) {
+      throw new Error("Codex Voice 尚未连接");
+    }
+    await sleep(100);
   }
 }
 
@@ -789,6 +850,17 @@ if (currentWindow) {
   await listen<WakeEvent>("jarvis-wake", ({ payload }) => {
     transcript.textContent = "“嗨，Jarvis”";
     state.manualStop = false;
+    state.speakerAccess = payload.speakerAccess ?? payload.speaker ?? "unknown";
+    updateSpeakerAccess(state.speakerAccess);
+    if (state.speakerAccess === "rejected") {
+      const message = "未识别的说话人";
+      setMode("ready");
+      banner.hidden = true;
+      response.textContent = message;
+      void invoke("speak_text", { text: message }).catch(() => undefined);
+      void armWakeListener();
+      return;
+    }
     if (!payload.ok) {
       setMode("degraded");
       banner.hidden = false;
@@ -816,18 +888,45 @@ $("#command-form").addEventListener("submit", async (event) => {
     await invoke("append_codex_voice_text", { text });
     return;
   }
-  if (!state.session) {
-    state.session = await invoke<Session>("start_jarvis", {
-      cwd: workspace,
-      threadId: savedThreadId(),
-      permissionMode,
-    });
-    localStorage.setItem(`${THREAD_KEY_PREFIX}${workspace}`, state.session.threadId);
-    $("#thread-id").textContent = state.session.threadId;
-    $("#workspace").textContent = state.session.cwd;
+  if (state.speakerAccess === "rejected") {
+    const message = "未识别的说话人";
+    response.textContent = message;
+    setMode("ready");
+    void invoke("speak_text", { text: message }).catch(() => undefined);
+    return;
   }
+  // Keep typed turns on the same Codex Voice path as spoken turns. If the
+  // realtime session cannot be established, retain a local text-task fallback
+  // and speak its reply with the bundled offline voice.
+  try {
+    await startDirectVoice();
+    await waitForVoiceActive();
+    response.textContent = "已接入 Codex 原始语音，正在处理文字指令。";
+    await invoke("append_codex_voice_text", { text });
+    return;
+  } catch {
+    response.textContent = "Codex Voice 尚未连接，改用本地模型语音播报。";
+  }
+  // Re-check the runtime on every text turn. This is cheap when the speaker
+  // state is unchanged, and rebuilds the thread instructions if a verifier
+  // changed Unknown/Allen access since the previous turn.
+  state.session = await invoke<Session>("start_jarvis", {
+    cwd: workspace,
+    threadId: savedThreadId(),
+    permissionMode,
+    speakerAccess: state.speakerAccess,
+  });
+  localStorage.setItem(`${THREAD_KEY_PREFIX}${workspace}`, state.session.threadId);
+  $("#thread-id").textContent = state.session.threadId;
+  $("#workspace").textContent = state.session.cwd;
   setMode("working");
-  await invoke("send_text", { text });
+  try {
+    await invoke("send_text", { text });
+  } catch (error) {
+    const message = String(error);
+    response.textContent = message;
+    setMode("ready");
+  }
 });
 mic.addEventListener("click", () => {
   if (state.directVoice?.voiceActive || peer) void stopDirectVoice();
@@ -874,6 +973,7 @@ $("#new-thread").addEventListener("click", async () => {
       cwd: workspace,
       threadId: null,
       permissionMode,
+      speakerAccess: state.speakerAccess,
     });
     state.session = freshSession;
     state.directVoice = null;
@@ -940,6 +1040,7 @@ if (currentWindow) {
     $("#workspace").textContent = workspace;
     ($("#workspace-setting") as HTMLInputElement).value = workspace;
     syncPermissionControls();
+    updateSpeakerAccess(state.speakerAccess);
     setWorker("orchestrator", "Wake word starting");
     setMode("ready");
     const backgroundStart = await invoke<boolean>("startup_is_background");

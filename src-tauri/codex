@@ -1,0 +1,38 @@
+#!/bin/zsh
+set -euo pipefail
+
+# A GUI app launched by macOS does not always inherit the user's shell proxy.
+# Re-read the system HTTP proxy so Codex Voice can reach its realtime endpoint.
+if [[ -z "${HTTP_PROXY:-}" && -x /usr/sbin/scutil ]]; then
+  proxy_info=$(/usr/sbin/scutil --proxy 2>/dev/null || true)
+  proxy_host=$(print -r -- "$proxy_info" | awk '$1 == "HTTPProxy" {print $3; exit}')
+  proxy_port=$(print -r -- "$proxy_info" | awk '$1 == "HTTPPort" {print $3; exit}')
+  if [[ -n "$proxy_host" && -n "$proxy_port" ]]; then
+    export HTTP_PROXY="http://${proxy_host}:${proxy_port}"
+    export HTTPS_PROXY="$HTTP_PROXY"
+    export ALL_PROXY="$HTTP_PROXY"
+  fi
+fi
+
+codex_bin="${JARVIS_REAL_CODEX_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex}"
+if [[ ! -x "$codex_bin" ]]; then
+  for candidate in \
+    /Applications/Codex.app/Contents/Resources/codex \
+    /opt/homebrew/bin/codex \
+    /usr/local/bin/codex; do
+    if [[ -x "$candidate" ]]; then
+      codex_bin="$candidate"
+      break
+    fi
+  done
+fi
+if [[ ! -x "$codex_bin" ]]; then
+  print -u2 "Jarvis cannot find the Codex CLI"
+  exit 127
+fi
+
+exec "$codex_bin" "$@" \
+  -c 'mcp_servers.hyper3d.enabled=false' \
+  -c 'mcp_servers.glm-mcp.enabled=false' \
+  -c 'mcp_servers.lanhu.enabled=false' \
+  -c 'mcp_servers.mimo-mcp.enabled=false'

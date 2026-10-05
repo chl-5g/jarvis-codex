@@ -16,12 +16,43 @@ const helperEntitlements = await readFile(
   new URL("../src-tauri/wake-helper/Entitlements.plist", import.meta.url),
   "utf8",
 );
+const tauriConfig = await readFile(
+  new URL("../src-tauri/tauri.conf.json", import.meta.url),
+  "utf8",
+);
+const codexWrapper = await readFile(
+  new URL("../src-tauri/codex", import.meta.url),
+  "utf8",
+);
+const localTts = await readFile(
+  new URL("../src-tauri/local_tts.py", import.meta.url),
+  "utf8",
+);
+
+test("text replies are spoken by the local macOS voice fallback", () => {
+  assert.match(backend, /async fn speak_text/);
+  assert.match(backend, /local_tts\.py/);
+  assert.doesNotMatch(backend, /\/usr\/bin\/say/);
+  assert.match(localTts, /mlx_audio\.tts\.utils/);
+  assert.match(localTts, /zm_yunxi/);
+  assert.match(frontend, /invoke\("speak_text"/);
+  assert.match(frontend, /function extractAgentText/);
+  assert.match(frontend, /lastCompletedAgentText/);
+  assert.match(frontend, /agentMessageBuffer\.trim\(\) \|\| lastCompletedAgentText/);
+});
 
 test("Voice uses Codex app-server V3 WebRTC directly", () => {
   assert.match(backend, /"version":\s*"v3"/);
   assert.match(backend, /"transport":\s*\{"type":\s*"webrtc"/);
   assert.match(backend, /"app-server",\s*"--enable",\s*"realtime_conversation",\s*"--stdio"/);
   assert.doesNotMatch(frontend, /OPENAI_API_KEY|ChatGPT.*button|hotkey/i);
+});
+
+test("bundled Codex runtime inherits the macOS proxy for realtime connectivity", () => {
+  assert.match(tauriConfig, /"codex"/);
+  assert.match(codexWrapper, /scutil --proxy/);
+  assert.match(codexWrapper, /HTTP_PROXY/);
+  assert.match(codexWrapper, /HTTPS_PROXY/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -57,6 +88,12 @@ test("text input can join the active Voice conversation", () => {
   assert.match(backend, /"thread\/realtime\/appendText"/);
 });
 
+test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {
+  assert.match(frontend, /await startDirectVoice\(\)/);
+  assert.match(frontend, /await waitForVoiceActive\(\)/);
+  assert.match(frontend, /Codex Voice 尚未连接/);
+});
+
 test("production configuration persists workspace and resumes threads", () => {
   assert.match(frontend, /jarvis\.workspace/);
   assert.match(frontend, /jarvis\.threadId:/);
@@ -83,6 +120,22 @@ test("permission profiles are persisted and mapped by the trusted backend", () =
   assert.match(backend, /sandbox: "workspace-write"/);
   assert.match(backend, /sandbox: "danger-full-access"/);
   assert.match(backend, /existing\.permission_mode == permission_mode/);
+});
+
+test("speaker verification gates Computer Use while preserving ordinary answers", () => {
+  assert.match(frontend, /type SpeakerAccess = "unknown" \| "allen" \| "rejected"/);
+  assert.match(frontend, /speakerAccess: state\.speakerAccess/);
+  assert.match(frontend, /未识别的说话人/);
+  assert.match(frontend, /state\.speakerAccess === "rejected"/);
+  assert.match(backend, /enum SpeakerAccess/);
+  assert.match(backend, /SpeakerAccess::Unknown/);
+  assert.match(backend, /SpeakerAccess::Allen/);
+  assert.match(backend, /SpeakerAccess::Rejected/);
+  assert.match(backend, /Computer Use and desktop-control tools are allowed/);
+  assert.match(backend, /do not use Computer Use, desktop-control/);
+  assert.match(backend, /speaker_access\.instructions\(\)/);
+  assert.match(backend, /mcp_servers\.node_repl\.enabled=false/);
+  assert.match(backend, /mcp_servers\.cua_repl\.enabled=false/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {

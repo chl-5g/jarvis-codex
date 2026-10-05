@@ -20,6 +20,8 @@ use tokio::{
 
 struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
+    speech: Mutex<Option<Child>>,
+    speaker_access: RwLock<SpeakerAccess>,
     cold_wake_pending: AtomicBool,
     background_start: bool,
     wake_enabled: AtomicBool,
@@ -90,6 +92,7 @@ struct CodexRuntime {
     voice_phase: RwLock<String>,
     realtime_session_id: RwLock<Option<String>>,
     permission_mode: PermissionMode,
+    speaker_access: SpeakerAccess,
     workspace: String,
 }
 
@@ -99,6 +102,35 @@ enum PermissionMode {
     Safe,
     Auto,
     Full,
+}
+
+/// Local speaker verification is intentionally a separate gate from the
+/// Codex permission mode.  `Unknown` may receive ordinary answers, but the
+/// model must not use Computer Use or other desktop-control tools.  A
+/// verifier can promote the session to `Allen`; a failed verification maps to
+/// `Rejected` and is handled before any task is sent to Codex.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum SpeakerAccess {
+    Unknown,
+    Allen,
+    Rejected,
+}
+
+impl Default for SpeakerAccess {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl SpeakerAccess {
+    fn instructions(self) -> &'static str {
+        match self {
+            Self::Allen => "The local speaker verifier identified the user as Allen. Computer Use and desktop-control tools are allowed under the selected Codex permission mode.",
+            Self::Unknown => "The local speaker verifier did not identify the speaker. Answer ordinary questions normally, but do not use Computer Use, desktop-control, screen-control, or other interactive UI tools. Explain that speaker verification is required before computer control.",
+            Self::Rejected => "The local speaker verifier rejected the speaker. Do not execute or send the requested task; respond with exactly: 未识别的说话人",
+        }
+    }
 }
 
 struct PermissionProfile {
@@ -189,17 +221,30 @@ impl CodexRuntime {
     async fn spawn(
         app: AppHandle,
         permission_mode: PermissionMode,
+        speaker_access: SpeakerAccess,
         workspace: String,
     ) -> Result<Arc<Self>, String> {
         let codex_binary = codex_binary_path(&app)?;
-        let mut child = Command::new(&codex_binary)
+        let mut command = Command::new(&codex_binary);
+        command
             // Realtime is an experimental app-server surface. Enable it only
             // for this isolated Jarvis child; never mutate ~/.codex/config.toml.
             .args(["app-server", "--enable", "realtime_conversation", "--stdio"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        if speaker_access != SpeakerAccess::Allen {
+            // Unknown speakers can still ask questions, but the process does
+            // not expose either local desktop-control MCP entry point.
+            command.args([
+                "-c",
+                "mcp_servers.node_repl.enabled=false",
+                "-c",
+                "mcp_servers.cua_repl.enabled=false",
+            ]);
+        }
+        let mut child = command
             .spawn()
             .map_err(|error| format!("无法启动 codex app-server：{error}"))?;
         let writer = child.stdin.take().ok_or("无法连接 Codex stdin")?;
@@ -216,6 +261,7 @@ impl CodexRuntime {
             voice_phase: RwLock::new("standby".to_owned()),
             realtime_session_id: RwLock::new(None),
             permission_mode,
+            speaker_access,
             workspace,
         });
 
@@ -471,6 +517,7 @@ fn start_wake_supervisor(app: AppHandle) {
             .await;
 
         let mut woke = false;
+        let mut wake_speaker_access = SpeakerAccess::Unknown;
         while state.wake_enabled.load(Ordering::SeqCst) {
             state.wake_ready.store(false, Ordering::SeqCst);
             let event_file =
@@ -541,6 +588,16 @@ fn start_wake_supervisor(app: AppHandle) {
                         }
                         Some("wake") => {
                             woke = true;
+                            wake_speaker_access = message
+                                .get("speakerAccess")
+                                .or_else(|| message.get("speaker"))
+                                .and_then(Value::as_str)
+                                .and_then(|value| match value {
+                                    "allen" => Some(SpeakerAccess::Allen),
+                                    "rejected" => Some(SpeakerAccess::Rejected),
+                                    _ => Some(SpeakerAccess::Unknown),
+                                })
+                                .unwrap_or(SpeakerAccess::Unknown);
                             state.wake_enabled.store(false, Ordering::SeqCst);
                             state.wake_ready.store(false, Ordering::SeqCst);
                             raise_jarvis_window(&app);
@@ -590,7 +647,15 @@ fn start_wake_supervisor(app: AppHandle) {
             // The WebView owns the RTCPeerConnection, so wake only raises the
             // Jarvis surface and asks the renderer to begin the official Codex
             // app-server V3 Voice handshake. No keypress or UI automation.
-            let _ = app.emit("jarvis-wake", json!({"ok": true}));
+            let speaker_access = match wake_speaker_access {
+                SpeakerAccess::Allen => "allen",
+                SpeakerAccess::Rejected => "rejected",
+                SpeakerAccess::Unknown => "unknown",
+            };
+            let _ = app.emit(
+                "jarvis-wake",
+                json!({"ok": true, "speakerAccess": speaker_access}),
+            );
         }
         let _ = app.emit("jarvis-wake-status", wake_status_value(&state).await);
     });
@@ -721,17 +786,21 @@ async fn ensure_runtime(
     cwd: &str,
     resume_thread_id: Option<&str>,
     permission_mode: PermissionMode,
+    speaker_access: SpeakerAccess,
 ) -> Result<Arc<CodexRuntime>, String> {
     let cwd = validated_workspace(cwd)?;
     let existing = { state.runtime.lock().await.clone() };
     if let Some(existing) = existing {
-        if existing.permission_mode == permission_mode && existing.workspace == cwd {
+        if existing.permission_mode == permission_mode
+            && existing.speaker_access == speaker_access
+            && existing.workspace == cwd
+        {
             return Ok(existing);
         }
         terminate_runtime(state).await?;
     }
     let profile = permission_mode.profile();
-    let runtime = CodexRuntime::spawn(app, permission_mode, cwd.clone()).await?;
+    let runtime = CodexRuntime::spawn(app, permission_mode, speaker_access, cwd.clone()).await?;
     runtime.request("initialize", json!({
         "clientInfo": {"name": "jarvis-codex", "title": "Jarvis Codex", "version": env!("CARGO_PKG_VERSION")},
         "capabilities": {"experimentalApi": true}
@@ -742,8 +811,9 @@ async fn ensure_runtime(
         "approvalPolicy": profile.approval_policy,
         "sandbox": profile.sandbox,
         "baseInstructions": format!(
-            "You are Codex speaking through the local Jarvis interface. Keep voice replies concise and natural, execute real tasks with Codex tools when asked, report progress while work continues, and accept spoken corrections in the same thread. {}",
-            profile.instructions
+            "You are Codex speaking through the local Jarvis interface. Keep voice replies concise and natural, execute real tasks with Codex tools when asked, report progress while work continues, and accept spoken corrections in the same thread. Do not say 'let me check', 'hold on', or imply that an action happened unless a real tool item has started; if no tool ran, say clearly that it has not been executed. {} {}",
+            profile.instructions,
+            speaker_access.instructions()
         )
     });
     let started = if let Some(thread_id) = resume_thread_id.filter(|value| !value.trim().is_empty())
@@ -780,8 +850,21 @@ async fn start_jarvis(
     cwd: String,
     thread_id: Option<String>,
     permission_mode: PermissionMode,
+    speaker_access: SpeakerAccess,
 ) -> Result<SessionInfo, String> {
-    let runtime = ensure_runtime(app, &state, &cwd, thread_id.as_deref(), permission_mode).await?;
+    if speaker_access == SpeakerAccess::Rejected {
+        return Err("未识别的说话人".to_owned());
+    }
+    *state.speaker_access.write().await = speaker_access;
+    let runtime = ensure_runtime(
+        app,
+        &state,
+        &cwd,
+        thread_id.as_deref(),
+        permission_mode,
+        speaker_access,
+    )
+    .await?;
     let thread_id = runtime.thread().await?;
     Ok(SessionInfo { thread_id, cwd })
 }
@@ -793,13 +876,26 @@ async fn start_codex_voice(
     cwd: String,
     thread_id: Option<String>,
     permission_mode: PermissionMode,
+    speaker_access: SpeakerAccess,
     sdp: String,
     voice: Option<String>,
 ) -> Result<DirectVoiceInfo, String> {
     if !sdp.starts_with("v=0") {
         return Err("WebRTC SDP offer 无效".to_owned());
     }
-    let runtime = ensure_runtime(app, &state, &cwd, thread_id.as_deref(), permission_mode).await?;
+    if speaker_access == SpeakerAccess::Rejected {
+        return Err("未识别的说话人".to_owned());
+    }
+    *state.speaker_access.write().await = speaker_access;
+    let runtime = ensure_runtime(
+        app,
+        &state,
+        &cwd,
+        thread_id.as_deref(),
+        permission_mode,
+        speaker_access,
+    )
+    .await?;
     let thread_id = runtime.thread().await?;
     if runtime.voice_active.load(Ordering::SeqCst) {
         let _ = runtime
@@ -878,7 +974,14 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
 
 #[tauri::command]
 async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), String> {
+    let speaker_access = *state.speaker_access.read().await;
+    if speaker_access == SpeakerAccess::Rejected {
+        return Err("未识别的说话人".to_owned());
+    }
     let runtime = runtime(&state).await?;
+    if runtime.speaker_access != speaker_access {
+        return Err("说话人状态已变化，请重新建立安全会话".to_owned());
+    }
     let thread_id = runtime.thread().await?;
     runtime
         .request(
@@ -892,8 +995,78 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
     Ok(())
 }
 
+async fn stop_speech(state: &AppState) {
+    if let Some(mut child) = state.speech.lock().await.take() {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+}
+
+#[tauri::command]
+async fn speak_text(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(());
+    }
+    stop_speech(&state).await;
+    #[cfg(target_os = "macos")]
+    let child = {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|error| format!("无法定位本地语音资源：{error}"))?;
+        let script = resource_dir.join("local_tts.py");
+        if !script.is_file() {
+            return Err(format!("本地语音脚本不存在：{}", script.display()));
+        }
+        let model_dir = std::env::var_os("JARVIS_TTS_MODEL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| resource_dir.join("../../../models/kokoro"));
+        let python = std::env::var_os("JARVIS_PYTHON").unwrap_or_else(|| "python3".into());
+        Command::new(python)
+        .args(["-u"])
+        .arg(&script)
+        .args(["--model"])
+        .arg(model_dir)
+        .args(["--text"])
+        .arg(text)
+        .spawn()
+        .map_err(|error| format!("无法启动本地 Kokoro 语音：{error}"))?
+    };
+    #[cfg(not(target_os = "macos"))]
+    let child = return Err("当前系统暂未接入本机语音".to_owned());
+    *state.speech.lock().await = Some(child);
+    loop {
+        let finished = {
+            let mut speech = state.speech.lock().await;
+            let Some(child) = speech.as_mut() else {
+                return Ok(());
+            };
+            match child.try_wait().map_err(|error| error.to_string())? {
+                Some(status) => {
+                    speech.take();
+                    if status.success() {
+                        return Ok(());
+                    }
+                    return Err(format!("本机语音退出：{status}"));
+                }
+                None => false,
+            }
+        };
+        if finished {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(80)).await;
+    }
+}
+
 #[tauri::command]
 async fn stop_all(state: State<'_, AppState>) -> Result<(), String> {
+    stop_speech(&state).await;
     let Ok(runtime) = runtime(&state).await else {
         return Ok(());
     };
@@ -950,6 +1123,7 @@ async fn resolve_server_request(
 
 #[tauri::command]
 async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
+    stop_speech(&state).await;
     terminate_runtime(&state).await
 }
 
@@ -964,6 +1138,8 @@ pub fn run() {
         }))
         .manage(AppState {
             runtime: Mutex::new(None),
+            speech: Mutex::new(None),
+            speaker_access: RwLock::new(SpeakerAccess::Unknown),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
             wake_enabled: AtomicBool::new(false),
@@ -986,6 +1162,7 @@ pub fn run() {
             stop_codex_voice,
             append_codex_voice_text,
             send_text,
+            speak_text,
             stop_all,
             resolve_server_request,
             shutdown
