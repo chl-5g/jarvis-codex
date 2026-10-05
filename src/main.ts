@@ -76,8 +76,6 @@ let agentMessageBuffer = "";
 let lastCompletedAgentText = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
-type VoiceReplyRoute = "unknown" | "cove" | "local-zh";
-let voiceReplyRoute: VoiceReplyRoute = "unknown";
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -93,12 +91,6 @@ function extractAgentText(value: unknown): string {
   return "";
 }
 
-// Codex Voice is selected when a realtime session starts. Route Chinese
-// turns through the offline Kokoro fallback so Chinese never remains on the
-// English-oriented cove voice; English stays on the original Codex voice.
-function containsChinese(text: string): boolean {
-  return /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/u.test(text);
-}
 const previewParams = new URLSearchParams(window.location.search);
 const tauriInternals = (window as Window & { __TAURI_INTERNALS__?: { invoke?: unknown } }).__TAURI_INTERNALS__;
 const currentWindow = typeof tauriInternals?.invoke === "function" ? getCurrentWindow() : null;
@@ -671,10 +663,6 @@ async function handle(message: Message) {
     const delta = typeof params?.delta === "string" ? params.delta : "";
     if (params?.role === "assistant") {
       assistantTranscriptBuffer += delta;
-      if (containsChinese(delta)) {
-        voiceReplyRoute = "local-zh";
-        voiceAudio.muted = true;
-      }
       response.textContent = assistantTranscriptBuffer;
       appendStreamLine(assistantTranscriptBuffer, "assistant", "voice-assistant");
       if (!state.agentWorking) setMode("speaking");
@@ -687,25 +675,14 @@ async function handle(message: Message) {
   } else if (method === "thread/realtime/transcript/done") {
     const text = typeof params?.text === "string" ? params.text.trim() : "";
     if (params?.role === "assistant") {
-      if (containsChinese(text)) {
-        voiceReplyRoute = "local-zh";
-        voiceAudio.muted = true;
-      }
       if (text) response.textContent = text;
       if (text) appendStreamLine(text, "assistant", "voice-assistant");
       sealStreamLine("voice-assistant");
       assistantTranscriptBuffer = "";
-      if (text && voiceReplyRoute === "local-zh") {
-        void invoke("speak_text", { text }).catch((error) => {
-          response.textContent = `本地中文语音失败：${String(error)}`;
-        });
-      }
       if (!state.agentWorking) setMode("listening");
     } else {
       if (text) transcript.textContent = text;
       if (text) appendStreamLine(text, "user", "voice-user");
-      voiceReplyRoute = containsChinese(text) ? "local-zh" : "cove";
-      voiceAudio.muted = voiceReplyRoute === "local-zh";
       sealStreamLine("voice-user");
       userTranscriptBuffer = "";
       if (text) triggerCharacterAction("acknowledge");
@@ -728,7 +705,6 @@ async function handle(message: Message) {
     appendStreamLine(String(detail), "error");
   } else if (method === "thread/realtime/closed") {
     cleanupPeer();
-    voiceReplyRoute = "unknown";
     updateVoiceInfo({
       codexConnected: true,
       voiceActive: false,
@@ -936,7 +912,6 @@ async function startDirectVoice({ coldStart = false } = {}) {
       sdp,
       voice: "cove",
     });
-    voiceReplyRoute = "unknown";
     updateVoiceInfo(info);
   } catch (error) {
     cleanupPeer();
@@ -1032,13 +1007,6 @@ $("#command-form").addEventListener("submit", async (event) => {
     setMode("working");
     return;
   }
-  const chineseTurn = containsChinese(text);
-  if (chineseTurn) {
-    // Do not inject Chinese into the cove audio session. Close it first so
-    // the text turn can use the local Kokoro voice end to end.
-    if (state.directVoice?.voiceActive) await stopDirectVoice();
-    response.textContent = "中文指令使用本地 Kokoro 语音，正在处理。";
-  }
   if (state.directVoice?.voiceActive) {
     response.textContent = "已将文字作为用户话语注入当前 Codex Voice 会话。";
     await invoke("append_codex_voice_text", { text });
@@ -1054,16 +1022,14 @@ $("#command-form").addEventListener("submit", async (event) => {
   // Keep typed turns on the same Codex Voice path as spoken turns. If the
   // realtime session cannot be established, retain a local text-task fallback
   // and speak its reply with the bundled offline voice.
-  if (!chineseTurn) {
-    try {
-      await startDirectVoice();
-      await waitForVoiceActive();
-      response.textContent = "已接入 Codex 原始语音，正在处理文字指令。";
-      await invoke("append_codex_voice_text", { text });
-      return;
-    } catch {
-      response.textContent = "Codex Voice 尚未连接，改用本地模型语音播报。";
-    }
+  try {
+    await startDirectVoice();
+    await waitForVoiceActive();
+    response.textContent = "已接入 Codex 原始语音，正在处理文字指令。";
+    await invoke("append_codex_voice_text", { text });
+    return;
+  } catch {
+    response.textContent = "Codex Voice 尚未连接，改用本地模型语音播报。";
   }
   // Re-check the runtime on every text turn. This is cheap when the speaker
   // state is unchanged, and rebuilds the thread instructions if a verifier

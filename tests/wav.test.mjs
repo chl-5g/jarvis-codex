@@ -94,12 +94,11 @@ test("text input can join the active Voice conversation", () => {
   assert.match(backend, /"thread\/realtime\/appendText"/);
 });
 
-test("Chinese replies use local speech while English keeps Codex Voice", () => {
-  assert.match(frontend, /function containsChinese/);
-  assert.match(frontend, /voiceReplyRoute = "local-zh"/);
-  assert.match(frontend, /voiceAudio\.muted = voiceReplyRoute === "local-zh"/);
-  assert.match(frontend, /invoke\("speak_text", \{ text \}\)/);
+test("Codex Voice is primary and local speech is only the fallback", () => {
+  assert.doesNotMatch(frontend, /voiceReplyRoute|containsChinese|local-zh/);
   assert.match(frontend, /voice: "cove"/);
+  assert.match(frontend, /Codex Voice 尚未连接，改用本地模型语音播报/);
+  assert.match(frontend, /invoke\("speak_text"/);
 });
 
 test("normal launch opens Codex Voice automatically", () => {
