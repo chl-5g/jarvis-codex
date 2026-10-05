@@ -49,7 +49,9 @@ const WORKSPACE_KEY = "jarvis.workspace";
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
 const THREAD_KEY_PREFIX = "jarvis.threadId:v2:";
-const PERMISSION_KEY = "jarvis.permissionMode";
+// Use a new key so an older session that was left in safe mode does not make
+// the single-user deployment ask for approval on every task.
+const PERMISSION_KEY = "jarvis.permissionMode:v2";
 const permissionLabels: Record<PermissionMode, string> = {
   safe: "安全模式 · 需要时确认",
   auto: "自动办公 · 当前目录自主执行",
@@ -154,7 +156,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </section>
   <footer class="controls">
     <button id="mic" class="control mic"><span aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg></span><b>CODEX VOICE</b><small>V3 WEBRTC · DIRECT</small></button>
-    <form id="command-form" class="command"><input id="command-input" aria-label="文字指令" placeholder="Voice 不可用时，发送本地 Codex 文字任务…" autocomplete="off"><button>EXECUTE</button></form>
+    <form id="command-form" class="command"><input id="command-input" aria-label="文字指令" placeholder="Voice 不可用时，发送本地 Codex 文字任务…" autocomplete="off"><button>SEND</button></form>
     <button id="stop" class="control stop" aria-label="暂停 Jarvis"><span id="stop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect class="stop-mark" x="6.5" y="6.5" width="11" height="11" rx="1.8"></rect></svg></span><b id="stop-label">PAUSE</b><small id="stop-hint">PAUSE ALL</small></button>
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
@@ -629,6 +631,13 @@ function updateVoiceInfo(info: DirectVoice) {
 
 async function handle(message: Message) {
   if (message.id !== undefined && message.method) {
+    if (permissionMode === "full") {
+      appendStreamLine(`已自动授权：${message.method}`, "system");
+      await invoke("resolve_server_request", { requestId: message.id, approved: true }).catch((error) => {
+        appendStreamLine(`自动授权失败：${String(error)}`, "error");
+      });
+      return;
+    }
     triggerCharacterAction("approval", 1800);
     approvalId = message.id; $("#approval-copy").textContent = `Codex 请求：${message.method}`; approval.showModal(); return;
   }
@@ -1226,6 +1235,10 @@ if (currentWindow) {
     updateVoiceInfo(await invoke<DirectVoice>("direct_voice_status"));
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
+    } else if (!backgroundStart && state.mode === "ready") {
+      // A normal launch should be immediately usable. The wake listener is
+      // still used for later re-entry after the session is stopped.
+      void startDirectVoice();
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {

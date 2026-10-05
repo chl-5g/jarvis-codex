@@ -94,6 +94,29 @@ test("text input can join the active Voice conversation", () => {
   assert.match(backend, /"thread\/realtime\/appendText"/);
 });
 
+test("Chinese replies use local speech while English keeps Codex Voice", () => {
+  assert.match(frontend, /function containsChinese/);
+  assert.match(frontend, /voiceReplyRoute = "local-zh"/);
+  assert.match(frontend, /voiceAudio\.muted = voiceReplyRoute === "local-zh"/);
+  assert.match(frontend, /invoke\("speak_text", \{ text \}\)/);
+  assert.match(frontend, /voice: "cove"/);
+});
+
+test("normal launch opens Codex Voice automatically", () => {
+  assert.match(frontend, /!backgroundStart && state\.mode === "ready"/);
+  assert.match(frontend, /void startDirectVoice\(\)/);
+});
+
+test("full permission auto-accepts server requests", () => {
+  assert.match(frontend, /PERMISSION_KEY = "jarvis\.permissionMode:v2"/);
+  assert.match(frontend, /permissionMode === "full"/);
+  assert.match(frontend, /resolve_server_request.*approved: true/);
+});
+
+test("text input button is labelled SEND", () => {
+  assert.match(frontend, /<button>SEND<\/button>/);
+});
+
 test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {
   assert.match(frontend, /await startDirectVoice\(\)/);
   assert.match(frontend, /await waitForVoiceActive\(\)/);
