@@ -29,6 +29,8 @@ type WakeEvent = {
 };
 type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
+type ModelMode = "hybrid" | "qwen" | "codex";
+type QwenEvent = { delta?: string; done?: boolean; error?: string };
 const SPEAKER_GATE_ENABLED = false;
 
 const state = {
@@ -52,10 +54,16 @@ const THREAD_KEY_PREFIX = "jarvis.threadId:v2:";
 // Use a new key so an older session that was left in safe mode does not make
 // the single-user deployment ask for approval on every task.
 const PERMISSION_KEY = "jarvis.permissionMode:v2";
+const MODEL_MODE_KEY = "jarvis.modelMode:v1";
 const permissionLabels: Record<PermissionMode, string> = {
   safe: "安全模式 · 需要时确认",
   auto: "自动办公 · 当前目录自主执行",
   full: "完全访问 · 高风险",
+};
+const modelModeLabels: Record<ModelMode, string> = {
+  hybrid: "混合模式 · Voice 优先，本地 Qwen 兜底",
+  qwen: "本地 Qwen · 8080",
+  codex: "Codex 原生 · 工作线程",
 };
 function storedPermissionMode(): PermissionMode {
   const value = localStorage.getItem(PERMISSION_KEY);
@@ -63,6 +71,11 @@ function storedPermissionMode(): PermissionMode {
 }
 let workspace = "";
 let permissionMode = storedPermissionMode();
+function storedModelMode(): ModelMode {
+  const value = localStorage.getItem(MODEL_MODE_KEY);
+  return value === "qwen" || value === "codex" ? value : "hybrid";
+}
+let modelMode = storedModelMode();
 const savedThreadId = () => localStorage.getItem(`${THREAD_KEY_PREFIX}${workspace}`);
 let peer: RTCPeerConnection | null = null;
 let microphoneStream: MediaStream | null = null;
@@ -74,6 +87,8 @@ let userTranscriptBuffer = "";
 let assistantTranscriptBuffer = "";
 let agentMessageBuffer = "";
 let lastCompletedAgentText = "";
+let lastUserTurnText = "";
+let qwenAnswerBuffer = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
 const voiceAudio = new Audio();
@@ -89,6 +104,13 @@ function extractAgentText(value: unknown): string {
     if (text) return text;
   }
   return "";
+}
+
+async function saveMemoryEpisode(title: string, summary: string, tags: string[]) {
+  if (!currentWindow || !summary.trim()) return;
+  await invoke("memory_save_episode", { title, summary, tags }).catch((error) => {
+    appendStreamLine(`记忆保存失败：${String(error)}`, "error");
+  });
 }
 
 const previewParams = new URLSearchParams(window.location.search);
@@ -153,7 +175,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>混合模式</b><small>Voice 在线时用 Codex，文字任务优先本地 Qwen</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>本地 Qwen</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>模型路由修改立即保存；混合模式在语音关闭时自动使用本地 Qwen。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -690,6 +712,7 @@ async function handle(message: Message) {
       if (text) transcript.textContent = text;
       if (text) appendStreamLine(text, "user", "voice-user");
       sealStreamLine("voice-user");
+      if (text) lastUserTurnText = text;
       userTranscriptBuffer = "";
       if (text) triggerCharacterAction("acknowledge");
     }
@@ -750,6 +773,15 @@ async function handle(message: Message) {
     appendStreamLine(state.manualStop ? "任务已暂停" : "任务完成", state.manualStop ? "system" : "task");
     const completedText = (agentMessageBuffer.trim() || lastCompletedAgentText.trim()).trim();
     lastCompletedAgentText = "";
+    if (!state.manualStop && completedText && lastUserTurnText) {
+      const userText = lastUserTurnText;
+      lastUserTurnText = "";
+      void saveMemoryEpisode(
+        "Jarvis Codex turn",
+        `User: ${userText}\nJarvis: ${completedText}`,
+        ["jarvis", "codex"],
+      );
+    }
     if (!state.manualStop && completedText && !state.directVoice?.voiceActive) {
       setMode("speaking");
       void invoke("speak_text", { text: completedText }).catch((error) => {
@@ -953,6 +985,30 @@ async function stopDirectVoice() {
 }
 
 if (currentWindow) {
+  await listen<QwenEvent>("qwen-event", ({ payload }) => {
+    if (payload.error) {
+      appendStreamLine(`本地 Qwen：${payload.error}`, "error", "qwen-assistant");
+      response.textContent = payload.error;
+      setMode("degraded");
+      return;
+    }
+    // reasoning chunks are intentionally ignored; only final `delta` content
+    // reaches the Jarvis stream and the voice output path.
+    if (payload.delta) {
+      qwenAnswerBuffer += payload.delta;
+      response.textContent = qwenAnswerBuffer;
+      appendStreamLine(qwenAnswerBuffer, "assistant", "qwen-assistant");
+      setMode("speaking");
+      setWorker("orchestrator", "Local Qwen responding");
+    }
+    if (payload.done) {
+      if (qwenAnswerBuffer.trim()) {
+        appendStreamLine(qwenAnswerBuffer, "assistant", "qwen-assistant");
+        sealStreamLine("qwen-assistant");
+      }
+      setWorker("orchestrator", "Local Qwen ready");
+    }
+  });
   await listen<Message>("codex-event", ({ payload }) => void handle(payload));
   await listen<WakeStatus>("jarvis-wake-status", ({ payload }) => {
     state.wake = payload;
@@ -1005,6 +1061,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const input = $("#command-input") as HTMLInputElement, text = input.value.trim();
   if (!text) return;
   state.manualStop = false;
+  lastUserTurnText = text;
   transcript.textContent = text;
   appendStreamLine(`文字指令：${text}`, "user");
   input.value = "";
@@ -1013,7 +1070,9 @@ $("#command-form").addEventListener("submit", async (event) => {
     setMode("working");
     return;
   }
-  if (state.directVoice?.voiceActive) {
+  const useLocalQwen = modelMode === "qwen"
+    || (modelMode === "hybrid" && !state.directVoice?.voiceActive);
+  if (state.directVoice?.voiceActive && !useLocalQwen) {
     response.textContent = "已将文字作为用户话语注入当前 Codex Voice 会话。";
     await invoke("append_codex_voice_text", { text });
     return;
@@ -1024,6 +1083,38 @@ $("#command-form").addEventListener("submit", async (event) => {
     setMode("ready");
     void invoke("speak_text", { text: message }).catch(() => undefined);
     return;
+  }
+  if (useLocalQwen) {
+    qwenAnswerBuffer = "";
+    setMode("working");
+    appendStreamLine("本地 Qwen 开始处理", "task");
+    try {
+      const answer = await invoke<string>("local_qwen_chat", { text });
+      const finalAnswer = answer.trim() || qwenAnswerBuffer.trim();
+      if (!finalAnswer) throw new Error("本地 Qwen 没有返回最终答案");
+      response.textContent = finalAnswer;
+      appendStreamLine(finalAnswer, "assistant", "qwen-assistant");
+      sealStreamLine("qwen-assistant");
+      qwenAnswerBuffer = "";
+      lastUserTurnText = "";
+      setMode("speaking");
+      await invoke("speak_text", { text: finalAnswer }).catch((error) => {
+        appendStreamLine(`本地语音失败：${String(error)}`, "error");
+      });
+      if (state.mode === "speaking") setMode("ready");
+      return;
+    } catch (error) {
+      qwenAnswerBuffer = "";
+      if (modelMode === "qwen") {
+        const message = `本地 Qwen 不可用：${String(error)}`;
+        response.textContent = message;
+        appendStreamLine(message, "error");
+        setMode("degraded");
+        return;
+      }
+      response.textContent = "本地 Qwen 尚未连接，改用 Codex 原生任务。";
+      appendStreamLine("本地 Qwen 不可用，切换 Codex", "system");
+    }
   }
   // Keep typed turns on the same Codex Voice path as spoken turns. If the
   // realtime session cannot be established, retain a local text-task fallback
@@ -1105,6 +1196,11 @@ function syncPermissionControls() {
   );
   if (input) input.checked = true;
   $("#permission-mode-label").textContent = permissionLabels[permissionMode];
+  const modelInput = document.querySelector<HTMLInputElement>(
+    `input[name="model-mode"][value="${modelMode}"]`,
+  );
+  if (modelInput) modelInput.checked = true;
+  $("#model-mode-label").textContent = modelModeLabels[modelMode];
 }
 
 $("#settings").addEventListener("click", () => {
@@ -1160,6 +1256,10 @@ $("#save-settings").addEventListener("click", async () => {
     'input[name="permission-mode"]:checked',
   )?.value as PermissionMode | undefined;
   const nextPermission = selectedPermission ?? permissionMode;
+  const selectedModel = document.querySelector<HTMLInputElement>(
+    'input[name="model-mode"]:checked',
+  )?.value as ModelMode | undefined;
+  const nextModelMode = selectedModel ?? modelMode;
   if (nextWorkspace !== workspace) {
     localStorage.setItem(WORKSPACE_KEY, nextWorkspace);
     response.textContent = "工作目录已保存，重启 Jarvis 后生效。";
@@ -1179,6 +1279,12 @@ $("#save-settings").addEventListener("click", async () => {
     setMode("ready");
     response.textContent = `权限已切换为“${permissionLabels[permissionMode]}”，下一次任务将续接当前 Codex thread。`;
     await armWakeListener();
+  }
+  if (nextModelMode !== modelMode) {
+    modelMode = nextModelMode;
+    localStorage.setItem(MODEL_MODE_KEY, modelMode);
+    syncPermissionControls();
+    appendStreamLine(`模型路由已切换：${modelModeLabels[modelMode]}`, "system");
   }
   settings.close();
 });

@@ -5,6 +5,8 @@ import test from "node:test";
 const frontend = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
 const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
+const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
 const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
   "utf8",
@@ -204,6 +206,33 @@ test("speaker verification is opt-in and Computer Use is open by default", () =>
   assert.match(backend, /JARVIS_SPEAKER_GATE/);
   assert.match(backend, /effective_speaker_access/);
   assert.match(backend, /speaker_access\.instructions\(\)/);
+});
+
+test("OpenAgentic memory bridge uses the existing four-layer Markdown layout", () => {
+  assert.match(backend, /mod memory;/);
+  assert.match(memoryBackend, /OPENAGENTIC_MEMORY_DIR/);
+  assert.match(backend, /memory_recall/);
+  assert.match(backend, /memory_save_episode/);
+  assert.match(memoryBackend, /fn initial_context/);
+  assert.match(memoryBackend, /fn skills_context/);
+  assert.match(backend, /memory_context/);
+});
+
+test("local Qwen route keeps reasoning out of Jarvis rendering", () => {
+  assert.match(backend, /local_qwen_chat/);
+  assert.match(qwenBackend, /chat_template_kwargs/);
+  assert.match(qwenBackend, /enable_thinking/);
+  assert.match(frontend, /qwen-event/);
+  assert.match(frontend, /local_qwen_chat/);
+  assert.match(frontend, /modelMode/);
+  assert.match(frontend, /[Rr]easoning/);
+});
+
+test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {
+  assert.match(frontend, /jarvis\.modelMode/);
+  assert.match(frontend, /本地 Qwen/);
+  assert.match(frontend, /混合模式/);
+  assert.match(frontend, /Codex 原生/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {
