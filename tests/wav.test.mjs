@@ -9,6 +9,9 @@ const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", impor
 const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
+const workflowBackend = await readFile(new URL("../src-tauri/src/workflow.rs", import.meta.url), "utf8");
+const tasksBackend = await readFile(new URL("../src-tauri/src/tasks.rs", import.meta.url), "utf8");
+const bridgeBackend = await readFile(new URL("../src-tauri/src/bridge.rs", import.meta.url), "utf8");
 const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
   "utf8",
@@ -256,6 +259,32 @@ test("local knowledge bridge indexes Markdown roots and returns bounded source e
   assert.match(knowledgeBackend, /JARVIS_KNOWLEDGE_ROOTS/);
   assert.match(knowledgeBackend, /incrementally indexed|Incrementally scan/);
   assert.match(knowledgeBackend, /Source:/);
+});
+
+test("file-backed workflows and tasks preserve explicit approval boundaries", () => {
+  assert.match(backend, /mod workflow;/);
+  assert.match(backend, /workflow_list/);
+  assert.match(backend, /workflow_save/);
+  assert.match(backend, /workflow_run/);
+  assert.match(backend, /task_schedule/);
+  assert.match(backend, /task_cancel/);
+  assert.match(backend, /task_resume/);
+  assert.match(backend, /task_run_due/);
+  assert.match(workflowBackend, /JARVIS_WORKFLOW_FILE/);
+  assert.match(workflowBackend, /approval-required/);
+  assert.match(workflowBackend, /requires_approval/);
+  assert.match(tasksBackend, /JARVIS_TASKS_FILE/);
+  assert.match(tasksBackend, /status.*completed/);
+  assert.match(frontend, /payload\.kind === "workflow" \|\| payload\.kind === "task"/);
+});
+
+test("future device bridge is disabled by default and loopback-token protected", () => {
+  assert.match(backend, /bridge_status/);
+  assert.match(backend, /bridge_enable/);
+  assert.match(bridgeBackend, /127\.0\.0\.1/);
+  assert.match(bridgeBackend, /pairing token/);
+  assert.match(bridgeBackend, /Authorization/);
+  assert.match(bridgeBackend, /MAX_EVENTS/);
 });
 
 test("wake activates the macOS app before focusing the Jarvis window", () => {

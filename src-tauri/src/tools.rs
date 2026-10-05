@@ -384,6 +384,9 @@ fn chrono_like_now() -> String {
 }
 
 fn emit_event(app: &AppHandle, event: ToolEvent) {
+    if let Ok(payload) = serde_json::to_value(&event) {
+        crate::bridge::publish("tool", payload);
+    }
     let _ = app.emit("jarvis-event", event);
 }
 
@@ -398,7 +401,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("jarvis-tools-{}-{stamp}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("jarvis-tools-{}-{stamp}", std::process::id()));
         let _ = fs::create_dir_all(&root);
         let safe = resolve_path(&root, "notes/a.md", false).unwrap();
         assert!(safe.starts_with(root.canonicalize().unwrap()));

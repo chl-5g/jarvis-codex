@@ -9,23 +9,23 @@
 ## Work slices
 
 1. **Tool gateway and unified events**
-   - Add a Rust gateway with path policy, command allow/deny checks, output limits, timeout, and audit events.
-   - Expose `tool_list` and `tool_execute` Tauri commands.
-   - Add frontend rendering for `jarvis-event` tool start/result/error events.
-   - Add red/green tests for safe file edits, command blocking, truncation, and event payloads.
+   - [x] Add a Rust gateway with path policy, command allow/deny checks, output limits, timeout, and audit events.
+   - [x] Expose `tool_list` and `tool_execute` Tauri commands.
+   - [x] Add frontend rendering for `jarvis-event` tool start/result/error events.
+   - [x] Add red/green tests for safe file edits, command blocking, truncation, and event payloads.
 
 2. **Knowledge bridge**
-   - Index Markdown files from `~/notes` plus configured roots into a local JSON index.
-   - Support incremental scan, keyword search, bounded excerpts, and source paths.
-   - Inject search results into local Qwen and Codex text turns only when relevant.
-   - Keep indexing local and optional; missing roots return an empty result.
+   - [x] Index Markdown files from `~/notes` plus configured roots into a local JSON index.
+   - [x] Support incremental scan, keyword search, bounded excerpts, and source paths.
+   - [x] Inject search results into local Qwen and Codex text turns only when relevant.
+   - [x] Keep indexing local and optional; missing roots return an empty result.
 
 3. **Workflow and task scheduler**
-   - Add a JSON workflow definition with sequential/conditional steps and explicit approval boundaries.
-   - Persist tasks under the local Jarvis state directory and run due tasks in a bounded Tokio scheduler.
-   - Emit lifecycle events and support cancel/resume without touching Codex Voice.
+   - [x] Add a JSON workflow definition with sequential/conditional steps and explicit approval boundaries.
+   - [x] Persist tasks under the local Jarvis state directory and run due tasks in a bounded Tokio scheduler.
+   - [x] Emit lifecycle events and support cancel/resume without touching Codex Voice.
 
 4. **Cross-device boundary and verification**
-   - Add a localhost-only authenticated event endpoint suitable for a future iPhone/Shortcuts adapter.
-   - Keep it disabled by default and document the pairing boundary.
-   - Run Rust/TypeScript tests, production build, and static review. Deployment/restart/push are separate user-authorized actions.
+   - [x] Add a localhost-only authenticated event endpoint suitable for a future iPhone/Shortcuts adapter.
+   - [x] Keep it disabled by default and document the pairing boundary.
+   - [x] Run Rust/TypeScript tests, production web build, and static review. Deployment/restart remain separate user-authorized actions.

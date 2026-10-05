@@ -36,6 +36,11 @@ type JarvisEvent = {
   phase?: string;
   callId?: string;
   toolName?: string;
+  runId?: string;
+  workflowId?: string;
+  taskId?: string;
+  stepId?: string;
+  message?: string;
   output?: string;
   error?: string;
 };
@@ -994,6 +999,15 @@ async function stopDirectVoice() {
 
 if (currentWindow) {
   await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
+    if (payload.kind === "workflow" || payload.kind === "task") {
+      const id = payload.runId ?? payload.taskId ?? payload.workflowId ?? payload.kind;
+      const phase = payload.phase ?? "event";
+      const detail = payload.message ?? payload.stepId ?? "";
+      const label = payload.kind === "workflow" ? "工作流" : "任务";
+      const kind = phase === "error" || phase === "approval-required" ? "error" : "task";
+      appendStreamLine(`${label}${phase}：${detail}`, kind, `${payload.kind}-${id}`);
+      return;
+    }
     if (payload.kind !== "tool") return;
     const tool = payload.toolName ?? "tool";
     if (payload.phase === "started") {

@@ -18,10 +18,13 @@ use tokio::{
     time::{timeout, Duration},
 };
 
+mod bridge;
 mod knowledge;
 mod memory;
 mod qwen;
+mod tasks;
 mod tools;
+mod workflow;
 
 const JARVIS_MODEL: &str = "gpt-5.6-sol";
 
@@ -1107,6 +1110,94 @@ fn tool_list() -> Vec<tools::ToolSpec> {
 }
 
 #[tauri::command]
+fn bridge_status() -> bridge::BridgeStatus {
+    bridge::status()
+}
+
+#[tauri::command]
+fn bridge_enable(pairing_token: Option<String>) -> Result<bridge::BridgeEnableResult, String> {
+    let result = bridge::enable(pairing_token)?;
+    bridge::publish(
+        "bridge.enabled",
+        serde_json::to_value(&result.status).unwrap_or_else(|_| json!({})),
+    );
+    Ok(result)
+}
+
+#[tauri::command]
+fn bridge_disable(pairing_token: Option<String>) -> Result<bridge::BridgeStatus, String> {
+    let status = bridge::disable(pairing_token)?;
+    bridge::publish(
+        "bridge.disabled",
+        serde_json::to_value(&status).unwrap_or_else(|_| json!({})),
+    );
+    Ok(status)
+}
+
+#[tauri::command]
+fn workflow_list() -> Vec<workflow::WorkflowDefinition> {
+    workflow::list()
+}
+
+#[tauri::command]
+fn workflow_save(
+    definition: workflow::WorkflowDefinition,
+) -> Result<workflow::WorkflowDefinition, String> {
+    workflow::save(definition)
+}
+
+#[tauri::command]
+async fn workflow_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workflow_id: String,
+    approved: Option<bool>,
+) -> Result<workflow::WorkflowRunResult, String> {
+    let runtime = runtime(&state).await?;
+    let workspace = PathBuf::from(runtime.workspace.clone());
+    let full_access = runtime.permission_mode == PermissionMode::Full;
+    workflow::run(
+        app,
+        &workspace,
+        &workflow_id,
+        full_access,
+        approved.unwrap_or(false),
+    )
+    .await
+}
+
+#[tauri::command]
+fn task_list() -> Vec<tasks::TaskRecord> {
+    tasks::list()
+}
+
+#[tauri::command]
+fn task_schedule(task: tasks::TaskRecord) -> Result<tasks::TaskRecord, String> {
+    tasks::schedule(task)
+}
+
+#[tauri::command]
+fn task_cancel(task_id: String) -> Result<(), String> {
+    tasks::cancel(&task_id)
+}
+
+#[tauri::command]
+fn task_resume(task_id: String) -> Result<tasks::TaskRecord, String> {
+    tasks::resume(&task_id)
+}
+
+#[tauri::command]
+async fn task_run_due(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<tasks::TaskRecord>, String> {
+    let runtime = runtime(&state).await?;
+    let workspace = PathBuf::from(runtime.workspace.clone());
+    let full_access = runtime.permission_mode == PermissionMode::Full;
+    tasks::run_due(app, &workspace, full_access).await
+}
+
+#[tauri::command]
 async fn tool_execute(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1300,6 +1391,17 @@ pub fn run() {
             knowledge_search,
             tool_list,
             tool_execute,
+            bridge_status,
+            bridge_enable,
+            bridge_disable,
+            workflow_list,
+            workflow_save,
+            workflow_run,
+            task_list,
+            task_schedule,
+            task_cancel,
+            task_resume,
+            task_run_due,
             local_qwen_chat,
             speak_text,
             stop_all,
@@ -1313,6 +1415,7 @@ pub fn run() {
                 Some(vec!["--background"]),
             ))?;
             let _ = app.autolaunch().enable();
+            tasks::start_scheduler(app.handle().clone());
             if let Some(window) = app.get_webview_window("main") {
                 if background_start {
                     let _ = window.hide();
