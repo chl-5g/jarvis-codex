@@ -1168,9 +1168,12 @@ $("#command-form").addEventListener("submit", async (event) => {
   const useLocalQwen = modelMode === "qwen"
     || (modelMode === "hybrid" && !state.directVoice?.voiceActive);
   if (state.directVoice?.voiceActive && !useLocalQwen) {
-    response.textContent = "已将文字作为用户话语注入当前 Codex Voice 会话。";
-    await invoke("append_codex_voice_text", { text });
-    return;
+    // Realtime appendText only feeds the experimental audio session input and
+    // does not start a normal Codex task turn. Typed commands must use the
+    // same turn/start path as the offline Codex route so tools and history see
+    // the request as a real user message.
+    await stopDirectVoice();
+    response.textContent = "已切换到 Codex 任务线程，正在处理文字指令。";
   }
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
@@ -1211,18 +1214,9 @@ $("#command-form").addEventListener("submit", async (event) => {
       appendStreamLine("本地 Qwen 不可用，切换 Codex", "system");
     }
   }
-  // Keep typed turns on the same Codex Voice path as spoken turns. If the
-  // realtime session cannot be established, retain a local text-task fallback
-  // and speak its reply with the bundled offline voice.
-  try {
-    await startDirectVoice();
-    await waitForVoiceActive();
-    response.textContent = "已接入 Codex 原始语音，正在处理文字指令。";
-    await invoke("append_codex_voice_text", { text });
-    return;
-  } catch {
-    response.textContent = "Codex Voice 尚未连接，改用本地模型语音播报。";
-  }
+  // Typed commands use the normal Codex turn path. Realtime Voice is an audio
+  // conversation transport; it is not the task submission API.
+  response.textContent = "正在发送文字指令到 Codex 任务线程…";
   // Re-check the runtime on every text turn. This is cheap when the speaker
   // state is unchanged, and rebuilds the thread instructions if a verifier
   // changed Unknown/Allen access since the previous turn.

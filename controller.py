@@ -1,4 +1,15 @@
 """Loopback-only Jarvis controller. Audio and history stay in memory."""
+# Dispatch before configuration, tokens, histories or legacy server initialization.
+import sys
+if __name__ == '__main__':
+    if sys.argv[1:] == ['--speech-worker']:
+        sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / 'src-tauri'))
+        from speech_worker import serve
+        serve()
+        raise SystemExit(0)
+    if sys.argv[1:] != ['--legacy-server']:
+        raise SystemExit('Choose --speech-worker or explicit --legacy-server')
+
 import base64
 import concurrent.futures
 import io

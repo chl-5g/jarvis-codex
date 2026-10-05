@@ -97,9 +97,11 @@ test("STOP suppresses transcript-tail handoffs and interrupts late turns", () =>
   assert.match(backend, /"turn\/interrupt"/);
 });
 
-test("text input can join the active Voice conversation", () => {
-  assert.match(frontend, /append_codex_voice_text/);
-  assert.match(backend, /"thread\/realtime\/appendText"/);
+test("typed commands use the normal Codex task turn", () => {
+  assert.match(frontend, /Realtime appendText only feeds the experimental audio session input/);
+  assert.match(frontend, /await stopDirectVoice\(\);/);
+  assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
+  assert.match(backend, /"turn\/start"/);
 });
 
 test("workspace is initialized before voice or text turns", () => {
@@ -115,7 +117,7 @@ test("workspace is initialized before voice or text turns", () => {
 test("Codex Voice is primary and local speech is only the fallback", () => {
   assert.doesNotMatch(frontend, /voiceReplyRoute|containsChinese|local-zh/);
   assert.match(frontend, /voice: "cove"/);
-  assert.match(frontend, /Codex Voice 尚未连接，改用本地模型语音播报/);
+  assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
   assert.match(frontend, /invoke\("speak_text"/);
 });
 
@@ -147,10 +149,9 @@ test("voice button mutes the microphone without stopping the Voice session", () 
   assert.match(style, /\.mic \.slash-mark/);
 });
 
-test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {
-  assert.match(frontend, /await startDirectVoice\(\)/);
-  assert.match(frontend, /await waitForVoiceActive\(\)/);
-  assert.match(frontend, /Codex Voice 尚未连接/);
+test("idle text input uses the Codex task thread", () => {
+  assert.match(frontend, /await invoke\("send_text", \{ text \}\)/);
+  assert.match(frontend, /turn\/start/);
 });
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {

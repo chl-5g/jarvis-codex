@@ -22,6 +22,7 @@ mod bridge;
 mod events;
 mod knowledge;
 mod memory;
+mod offline_speech;
 mod qwen;
 mod skills;
 mod tasks;
@@ -52,6 +53,7 @@ fn skills_context(query: String, max_chars: Option<usize>) -> String {
 struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
+    offline_speech: Arc<offline_speech::OfflineSpeech>,
     speaker_access: RwLock<SpeakerAccess>,
     cold_wake_pending: AtomicBool,
     background_start: bool,
@@ -1302,6 +1304,7 @@ async fn local_qwen_chat(
 }
 
 async fn stop_speech(state: &AppState) {
+    state.offline_speech.cancel().await;
     if let Some(mut child) = state.speech.lock().await.take() {
         let _ = child.kill().await;
         let _ = child.wait().await;
@@ -1319,6 +1322,16 @@ async fn speak_text(
         return Ok(());
     }
     stop_speech(&state).await;
+    if let Ok(wav) = state.offline_speech.synthesize(&app, text).await {
+        let path = std::env::temp_dir().join(format!("jarvis-speech-{}.wav", std::process::id()));
+        fs::write(&path, wav).map_err(|e| e.to_string())?;
+        let child = Command::new("/usr/bin/afplay")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        *state.speech.lock().await = Some(child);
+        return Ok(());
+    }
     #[cfg(target_os = "macos")]
     let child = {
         let resource_dir = app
@@ -1445,6 +1458,7 @@ pub fn run() {
         .manage(AppState {
             runtime: Mutex::new(None),
             speech: Mutex::new(None),
+            offline_speech: offline_speech::OfflineSpeech::new(),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
