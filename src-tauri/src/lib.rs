@@ -22,6 +22,7 @@ mod bridge;
 mod cipherpipe;
 mod events;
 mod knowledge;
+mod logging;
 mod memory;
 mod offline_speech;
 mod qwen;
@@ -1464,6 +1465,7 @@ async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    logging::init();
     let arguments: Vec<String> = std::env::args().collect();
     let cold_wake_pending = arguments.iter().any(|argument| argument == "--jarvis-wake");
     let background_start = arguments.iter().any(|argument| argument == "--background");

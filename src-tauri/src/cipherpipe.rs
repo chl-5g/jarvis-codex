@@ -72,7 +72,11 @@ impl CipherPipe {
                     continue;
                 };
                 if value.get("event").and_then(Value::as_str) == Some("message") {
-                    let _ = app_events.emit("jarvis-event", json!({"source":"cipherpipe","kind":"cipherpipe-message","from":value["from"],"text":value["text"],"id":value["id"]}));
+                    crate::events::emit(
+                        &app_events,
+                        "cipherpipe",
+                        json!({"kind":"cipherpipe-message","from":value["from"],"text":value["text"],"id":value["id"]}),
+                    );
                 } else if tx.send(value).await.is_err() {
                     break;
                 }
