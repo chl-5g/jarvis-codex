@@ -1472,11 +1472,9 @@ if (currentWindow) {
     setMode("ready");
     try {
       const model = await invoke<string>("on_device_model_status");
-      appendStreamLine(`端侧模型已连接：${model}`, "system");
-      setWorker("orchestrator", "On-device model ready");
+      appendStreamLine(`端侧模型已连接（备用）：${model}`, "system");
     } catch (error) {
-      appendStreamLine(`端侧模型未连接：${String(error)}`, "error");
-      setWorker("orchestrator", "On-device model offline", false);
+      appendStreamLine("端侧模型未发现，继续使用原生 Codex Voice", "system");
     }
     const backgroundStart = await invoke<boolean>("startup_is_background");
     if (!backgroundStart) {
