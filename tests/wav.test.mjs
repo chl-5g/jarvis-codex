@@ -98,6 +98,13 @@ test("wake phrase opens the same direct Voice path", () => {
   assert.match(wakeHelper, /"--test-wake"/);
 });
 
+test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
+  assert.match(wakeHelper, /"你好jarvis"/);
+  assert.match(wakeHelper, /"你好贾维斯"/);
+  assert.match(wakeHelper, /"hi jarvis"/);
+  assert.match(wakeHelper, /"hijarvis"/);
+});
+
 test("STOP suppresses transcript-tail handoffs and interrupts late turns", () => {
   assert.match(backend, /"flushTranscriptTailOnSessionEnd":\s*false/);
   assert.match(backend, /for _ in 0\.\.6/);

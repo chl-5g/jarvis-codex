@@ -13,12 +13,16 @@ final class WakeListener {
     private let hostApp: URL?
 
     private let phrases = [
+        "你好jarvis",
+        "hi jarvis",
+        "hijarvis",
         "嗨jarvis",
         "嘿jarvis",
-        "hijarvis",
         "heyjarvis",
         "嗨贾维斯",
         "嘿贾维斯",
+        "你好贾维斯",
+        "hi贾维斯",
     ]
 
     init() {
