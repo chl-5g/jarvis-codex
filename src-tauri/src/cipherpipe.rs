@@ -2,7 +2,7 @@
 //! Jarvis keeps ownership of model routing, tools, and permissions.
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, Command},
