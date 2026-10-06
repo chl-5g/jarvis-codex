@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, Command},
-    sync::Mutex,
+    sync::{mpsc, Mutex},
     time::{timeout, Duration},
 };
 
@@ -15,7 +15,7 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 struct Worker {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<tokio::process::ChildStdout>,
+    responses: mpsc::Receiver<Value>,
     next_id: u64,
 }
 pub struct CipherPipe {
@@ -63,10 +63,25 @@ impl CipherPipe {
             .map_err(|e| format!("无法启动 CipherPipe bridge：{e}"))?;
         let stdin = child.stdin.take().ok_or("CipherPipe stdin 不可用")?;
         let stdout = child.stdout.take().ok_or("CipherPipe stdout 不可用")?;
+        let (tx, rx) = mpsc::channel(32);
+        let app_events = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                if value.get("event").and_then(Value::as_str) == Some("message") {
+                    let _ = app_events.emit("jarvis-event", json!({"source":"cipherpipe","kind":"cipherpipe-message","from":value["from"],"text":value["text"],"id":value["id"]}));
+                } else if tx.send(value).await.is_err() {
+                    break;
+                }
+            }
+        });
         *self.worker.lock().await = Some(Worker {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            responses: rx,
             next_id: 1,
         });
         Ok(())
@@ -103,19 +118,11 @@ impl CipherPipe {
             .await
             .map_err(|e| e.to_string())?;
         worker.stdin.flush().await.map_err(|e| e.to_string())?;
-        let mut response = String::new();
         loop {
-            response.clear();
-            timeout(TIMEOUT, worker.stdout.read_line(&mut response))
+            let value = timeout(TIMEOUT, worker.responses.recv())
                 .await
                 .map_err(|_| "CipherPipe 响应超时".to_owned())?
-                .map_err(|e| e.to_string())?;
-            let value: Value = serde_json::from_str(&response)
-                .map_err(|_| "CipherPipe 响应格式无效".to_owned())?;
-            if value.get("event").and_then(Value::as_str) == Some("message") {
-                let _ = app.emit("jarvis-event", json!({"source":"cipherpipe","kind":"cipherpipe-message","from":value["from"],"text":value["text"],"id":value["id"]}));
-                continue;
-            }
+                .ok_or("CipherPipe 已断开")?;
             if value.get("event").and_then(Value::as_str) == Some("ready") {
                 continue;
             }
