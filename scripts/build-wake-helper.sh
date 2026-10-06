@@ -23,3 +23,14 @@ cp "$helper_dir/Info.plist" "$app_dir/Contents/Info.plist"
   --entitlements "$helper_dir/Entitlements.plist" \
   --sign "$signing_identity" \
   "$app_dir"
+
+location_dir="$project_dir/src-tauri/location-helper"
+location_app="$location_dir/JarvisLocationHelper.app"
+mkdir -p "$location_app/Contents/MacOS"
+cp "$location_dir/Info.plist" "$location_app/Contents/Info.plist"
+/usr/bin/swiftc -O -framework AppKit -framework CoreLocation \
+  "$location_dir/JarvisLocationHelper.swift" \
+  -o "$location_app/Contents/MacOS/JarvisLocationHelper"
+/usr/bin/codesign --force --options runtime \
+  --entitlements "$location_dir/Entitlements.plist" \
+  --sign "$signing_identity" "$location_app"

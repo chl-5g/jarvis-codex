@@ -9,7 +9,7 @@ fn directory() -> PathBuf {
     if let Some(value) = std::env::var_os("JARVIS_LOG_DIR") {
         return PathBuf::from(value);
     }
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Jarvis-codex/logs")
+    PathBuf::from(crate::config::log_directory())
 }
 
 pub fn append<T: Serialize>(stream: &str, value: &T) {

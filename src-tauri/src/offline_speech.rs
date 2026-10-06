@@ -47,8 +47,7 @@ impl OfflineSpeech {
             .arg("--speech-worker")
             .env(
                 "JARVIS_MODEL_ROOT",
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-                    .join("Jarvis-codex/models"),
+                PathBuf::from(crate::config::project_root()).join("models"),
             )
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -170,12 +169,16 @@ pub fn python_path() -> std::ffi::OsString {
     if let Some(path) = std::env::var_os("JARVIS_PYTHON") {
         return path;
     }
-    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    let project_root = PathBuf::from(crate::config::project_root());
     for relative in [
-        "Jarvis-codex/.venv/bin/python",
+        ".venv/bin/python",
         "Documents/Codex/2026-10-05/ni/work/jarvis-venv/bin/python",
     ] {
-        let path = home.join(relative);
+        let path = if relative.starts_with("Documents/") {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(relative)
+        } else {
+            project_root.join(relative)
+        };
         if path.is_file() {
             return path.into_os_string();
         }

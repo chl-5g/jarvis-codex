@@ -46,6 +46,7 @@
     "shortDescription": "Wake Jarvis and work through Codex",
     "resources": {
       "wake-helper/JarvisWakeListener.app/": "wake-helper/JarvisWakeListener.app/",
+      "location-helper/JarvisLocationHelper.app/": "location-helper/JarvisLocationHelper.app/",
       "codex": "codex",
       "local_tts.py": "local_tts.py",
       "speech_worker.py": "speech_worker.py",

@@ -11,7 +11,10 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
-    "strict": true
+    "strict": true,
+    "paths": {
+      "$PROJECT_PATH/*": ["./*"]
+    }
   },
   "include": ["src"]
 }

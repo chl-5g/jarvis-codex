@@ -8,5 +8,7 @@
 	<string>Jarvis locally listens for the wake phrase “Hi Jarvis”; official Codex Voice handles the conversation.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Jarvis locally recognizes its wake phrase before opening official Codex Voice.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Jarvis requests location only when a capability needs the current area.</string>
 </dict>
 </plist>

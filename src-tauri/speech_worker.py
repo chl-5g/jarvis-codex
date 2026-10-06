@@ -19,7 +19,8 @@ MAX_TEXT = 1800
 
 class SpeechBackend:
     def __init__(self):
-        root = Path(os.environ.get('JARVIS_MODEL_ROOT', Path.home() / 'Jarvis-codex/models'))
+        project_root = os.environ.get('PROJECT_PATH') or os.environ.get('PROJECTPATH') or str(Path(__file__).resolve().parents[1])
+        root = Path(os.environ.get('JARVIS_MODEL_ROOT', str(Path(project_root) / 'models')))
         self.stt = Path(os.environ.get('JARVIS_STT_MODEL_DIR', root / 'whisper'))
         self.tts = Path(os.environ.get('JARVIS_TTS_MODEL_DIR', root / 'kokoro'))
         os.environ['HF_HUB_OFFLINE'] = '1'

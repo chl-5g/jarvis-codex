@@ -49,38 +49,57 @@ pub fn list() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "read_file",
-            description: "Read a UTF-8 text file within the active workspace.",
+            description: crate::config::tool_description("read_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "write_file",
-            description: "Create or replace a UTF-8 text file within the active workspace.",
+            description: crate::config::tool_description("write_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "append_file",
-            description: "Append UTF-8 text to a file within the active workspace.",
+            description: crate::config::tool_description("append_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "list_files",
-            description: "List files below a workspace directory.",
+            description: crate::config::tool_description("list_files"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "search_files",
-            description: "Search text files below a workspace directory.",
+            description: crate::config::tool_description("search_files"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "run_command",
-            description:
-                "Run a read-only command from the active workspace using the local whitelist.",
+            description: crate::config::tool_description("run_command"),
             requires_full_access: true,
         },
         ToolSpec {
             name: "current_time",
-            description: "Return the current UTC time.",
+            description: crate::config::tool_description("current_time"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "current_location",
+            description: crate::config::tool_description("current_location"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "current_weather",
+            description: crate::config::tool_description("current_weather"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "open_camera",
+            description: crate::config::tool_description("open_camera"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "request_capability",
+            description: crate::config::tool_description("request_capability"),
             requires_full_access: false,
         },
     ]
@@ -93,7 +112,7 @@ pub fn openai_schemas() -> Vec<Value> {
     vec![
         schema(
             "read_file",
-            "Read a UTF-8 text file within the active workspace.",
+            crate::config::tool_description("read_file"),
             json!({
                 "path": {"type": "string", "description": "Workspace-relative or explicitly permitted path"}
             }),
@@ -101,7 +120,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "write_file",
-            "Create or replace a UTF-8 text file within the active workspace.",
+            crate::config::tool_description("write_file"),
             json!({
                 "path": {"type": "string"}, "content": {"type": "string"}
             }),
@@ -109,7 +128,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "append_file",
-            "Append UTF-8 text to a file within the active workspace.",
+            crate::config::tool_description("append_file"),
             json!({
                 "path": {"type": "string"}, "content": {"type": "string"}
             }),
@@ -117,7 +136,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "list_files",
-            "List files below a workspace directory.",
+            crate::config::tool_description("list_files"),
             json!({
                 "path": {"type": "string", "description": "Directory, default ."}
             }),
@@ -125,7 +144,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "search_files",
-            "Search text files below a workspace directory.",
+            crate::config::tool_description("search_files"),
             json!({
                 "query": {"type": "string"}, "path": {"type": "string", "description": "Directory, default ."}
             }),
@@ -133,7 +152,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "run_command",
-            "Run a non-destructive shell command from the active workspace with a timeout.",
+            crate::config::tool_description("run_command"),
             json!({
                 "command": {"type": "string"}, "timeout": {"type": "integer", "minimum": 1, "maximum": DEFAULT_TIMEOUT_SECONDS}
             }),
@@ -141,9 +160,33 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "current_time",
-            "Return the current UTC time.",
+            crate::config::tool_description("current_time"),
             json!({}),
             &[],
+        ),
+        schema(
+            "current_location",
+            crate::config::tool_description("current_location"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "current_weather",
+            crate::config::tool_description("current_weather"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "open_camera",
+            crate::config::tool_description("open_camera"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "request_capability",
+            crate::config::tool_description("request_capability"),
+            json!({"capability": {"type": "string"}}),
+            &["capability"],
         ),
     ]
 }
@@ -192,6 +235,13 @@ pub async fn execute(
         "search_files" => search_files(workspace, &args, full_access),
         "run_command" => run_command(workspace, &args, full_access).await,
         "current_time" => Ok(chrono_like_now()),
+        "current_location" => crate::request_current_location(app.clone()).await,
+        "current_weather" => network_weather(app.clone()).await,
+        "open_camera" => open_camera().await,
+        "request_capability" => match string_arg(&args, "capability") {
+            Ok(capability) => crate::open_capability_settings(capability.trim()).await,
+            Err(error) => Err(error),
+        },
         _ => Err(format!("未知工具：{tool_name}")),
     };
 
@@ -346,6 +396,107 @@ async fn run_command(root: &Path, args: &Value, full_access: bool) -> Result<Str
     }
     let status = output.status.code().unwrap_or(-1);
     Ok(format!("Exit code: {status}\n{}", truncate(text)))
+}
+
+async fn network_location() -> Result<String, String> {
+    let output = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "8",
+            "https://ipapi.co/json/",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|error| format!("位置服务启动失败：{error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "位置服务不可用：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("位置服务返回无效数据：{error}"))?;
+    let city = value.get("city").and_then(Value::as_str).unwrap_or("");
+    let region = value.get("region").and_then(Value::as_str).unwrap_or("");
+    let country = value
+        .get("country_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if city.is_empty() && region.is_empty() {
+        return Err("位置服务没有返回城市".to_owned());
+    }
+    Ok(
+        json!({"city": city, "region": region, "country": country, "source": "network"})
+            .to_string(),
+    )
+}
+
+async fn network_weather(app: AppHandle) -> Result<String, String> {
+    let location = match crate::request_current_location(app).await {
+        Ok(location) => location,
+        Err(_) => network_location().await?,
+    };
+    let value: Value =
+        serde_json::from_str(&location).map_err(|error| format!("位置数据解析失败：{error}"))?;
+    let city = value
+        .get("city")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+        .ok_or("无法确定当前城市")?;
+    let encoded = city.replace(' ', "%20");
+    let url = format!("https://wttr.in/{encoded}?format=j1");
+    let output = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "12",
+            &url,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|error| format!("天气服务启动失败：{error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "天气服务不可用：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let weather: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("天气服务返回无效数据：{error}"))?;
+    Ok(json!({"location": value, "weather": weather, "source": "wttr.in"}).to_string())
+}
+
+async fn open_camera() -> Result<String, String> {
+    let status = Command::new("/usr/bin/open")
+        .args(["-a", "Photo Booth"])
+        .status()
+        .await;
+    let status = match status {
+        Ok(status) if status.success() => {
+            return Ok(crate::config::prompt("cameraOpenSuccess").to_owned())
+        }
+        Ok(status) => status,
+        Err(error) => {
+            return Err(format!(
+                "{}：{error}",
+                crate::config::prompt("cameraOpenFailure")
+            ))
+        }
+    };
+    if !status.success() {
+        let _ = crate::open_capability_settings("camera").await;
+        return Err(crate::config::prompt("cameraOpenFailure").to_owned());
+    }
+    Err(crate::config::prompt("cameraOpenFailure").to_owned())
 }
 
 fn resolve_path(root: &Path, raw: &str, full_access: bool) -> Result<PathBuf, String> {

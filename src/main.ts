@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./style.css";
 import { parseCipherPipeCommand, shouldUseLocalQwen } from "./text-routing.mjs";
-import uiConfig from "/Users/caihaolun/Jarvis-codex/config/ui.json";
+import uiConfig from "$PROJECT_PATH/config/ui.json";
+import pathsConfig from "$PROJECT_PATH/config/paths.json";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -67,7 +68,8 @@ const state = {
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
-const PROJECT_WORKSPACE = "/Users/caihaolun/Jarvis-codex/agent-workspace";
+const PROJECT_ROOT = import.meta.env.VITE_PROJECTPATH || pathsConfig.projectRoot;
+const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
@@ -1473,9 +1475,11 @@ if (currentWindow) {
       appendStreamLine("端侧模型未发现，继续使用原生 Codex Voice", "system");
     }
     const backgroundStart = await invoke<boolean>("startup_is_background");
-    // Permissions are requested lazily by the capability that needs them.
-    // Startup only checks the existing state and never opens a permission prompt.
-    await armWakeListener();
+    // Read capability state only. Starting the wake helper would prompt for
+    // microphone/speech access during every application launch.
+    const permissions = await invoke<{ microphone: string; speechRecognition: string; location: string }>("permission_status");
+    state.wake = { enabled: false, ready: false, authorization: permissions.microphone };
+    $("#wake-auth").textContent = permissions.microphone;
     updateVoiceInfo(await invoke<DirectVoice>("direct_voice_status"));
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";

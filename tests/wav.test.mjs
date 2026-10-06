@@ -7,6 +7,7 @@ const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
 const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
+const promptsConfig = await readFile(new URL("../config/prompts.json", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
@@ -106,7 +107,8 @@ test("typed commands use the normal Codex task turn", () => {
 
 test("workspace is initialized before voice or text turns", () => {
   assert.match(frontend, /async function ensureWorkspace\(\)/);
-  assert.match(frontend, /const PROJECT_WORKSPACE = "\/Users\/caihaolun\/Jarvis-codex\/agent-workspace"/);
+  assert.match(frontend, /import pathsConfig from "\$PROJECT_PATH\/config\/paths\.json"/);
+  assert.match(frontend, /const PROJECT_WORKSPACE = `\$\{PROJECT_ROOT\}\/\$\{pathsConfig\.workspace\}`/);
   assert.match(frontend, /let workspace = PROJECT_WORKSPACE/);
   assert.match(frontend, /value !== "\/"/);
   assert.match(frontend, /await ensureWorkspace\(\);\n  voiceStartInFlight/);
@@ -258,7 +260,8 @@ test("local Qwen can call the audited tool gateway and keeps the selected worksp
   assert.match(qwenBackend, /tools::execute/);
   assert.match(qwenBackend, /"role":"tool"/);
   assert.match(qwenBackend, /JARVIS_ON_DEVICE_TOOLS/);
-  assert.match(qwenBackend, /Agent 工具层已经接入并可用/);
+  assert.match(qwenBackend, /config::prompt\("toolPolicy"\)/);
+  assert.match(promptsConfig, /Agent 工具层已经接入并可用/);
   assert.match(backend, /async fn local_qwen_chat/);
   assert.match(backend, /validated_workspace/);
   assert.match(frontend, /local_qwen_chat.*workspace/);
