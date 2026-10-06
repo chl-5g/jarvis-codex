@@ -127,8 +127,8 @@ test("STOP suppresses transcript-tail handoffs and interrupts late turns", () =>
 });
 
 test("typed commands use the normal Codex task turn", () => {
-  assert.match(frontend, /append_codex_voice_text/);
-  assert.match(frontend, /文字指令已发送到原生 Codex Voice/);
+  assert.doesNotMatch(frontend, /文字指令已进入原生 Codex Voice/);
+  assert.match(frontend, /Realtime Voice is an[\s\S]*audio transport/);
   assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
   assert.match(backend, /"turn\/start"/);
 });

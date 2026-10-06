@@ -1187,32 +1187,6 @@ $("#command-form").addEventListener("submit", async (event) => {
     void invoke("speak_text", { text: message }).catch(() => undefined);
     return;
   }
-  if (state.directVoice?.voiceActive && !useLocalQwen) {
-    setMode("listening");
-    response.textContent = "文字指令已发送到原生 Codex Voice…";
-    try {
-      await invoke("append_codex_voice_text", { text });
-      appendStreamLine("文字指令已进入原生 Codex Voice", "system");
-    } catch (error) {
-      response.textContent = `Codex Voice 文字输入失败：${String(error)}`;
-      appendStreamLine(response.textContent, "error");
-      setMode("degraded");
-    }
-    return;
-  }
-  if (state.directVoice?.voiceActive) {
-    setMode("working");
-    response.textContent = "正在交给 Codex Voice 处理文字指令…";
-    try {
-      await invoke("append_codex_voice_text", { text });
-      appendStreamLine("文字指令已进入原生 Codex Voice", "system");
-    } catch (error) {
-      response.textContent = `Codex Voice 文字输入失败：${String(error)}`;
-      appendStreamLine(response.textContent, "error");
-      setMode("degraded");
-    }
-    return;
-  }
   if (useLocalQwen) {
     qwenAnswerBuffer = "";
     setMode("working");
@@ -1241,8 +1215,10 @@ $("#command-form").addEventListener("submit", async (event) => {
       appendStreamLine("端侧模型不可用，切换 Codex", "system");
     }
   }
-  // Typed commands use the normal Codex turn path. Realtime Voice is an audio
-  // conversation transport; it is not the task submission API.
+  // Typed commands always use the normal Codex task path. Realtime Voice is an
+  // audio transport and does not expose Jarvis's dynamic tool-call loop, so
+  // routing text through it would prevent semantic tool selection such as
+  // deciding to capture a camera image from a visual question.
   response.textContent = "正在发送文字指令到 Codex 任务线程…";
   // Re-check the runtime on every text turn. This is cheap when the speaker
   // state is unchanged, and rebuilds the thread instructions if a verifier
