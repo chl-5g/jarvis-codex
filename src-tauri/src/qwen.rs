@@ -151,7 +151,7 @@ async fn request_round(
         "stream": true,
         "max_tokens": 1024,
         "temperature": 0.4,
-        "chat_template_kwargs": {"enable_thinking": env_flag("JARVIS_QWEN_THINKING", false), "reasoning_effort": "medium", "preserve_thinking": false}
+        "chat_template_kwargs": {"enable_thinking": false, "reasoning_effort": "none", "preserve_thinking": false}
     });
     if tools_enabled {
         body["tools"] = Value::Array(schemas);
