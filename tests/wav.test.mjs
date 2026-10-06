@@ -84,7 +84,8 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
 });
 
 test("bundled Codex runtime prefers one stable local CLI identity", () => {
-  assert.ok(codexWrapper.indexOf('$HOME/.local/bin/codex') < codexWrapper.indexOf('/Applications/ChatGPT.app'));
+  assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN:-\$HOME\/\.local\/bin\/codex/);
+  assert.doesNotMatch(codexWrapper, /ChatGPT\.app/);
   assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN/);
 });
 
