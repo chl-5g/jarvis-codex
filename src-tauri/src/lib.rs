@@ -393,6 +393,12 @@ impl CodexRuntime {
                     }
                 }
                 let _ = event_app.emit("codex-event", message.clone());
+                if message.get("method").and_then(Value::as_str) == Some("item/completed") {
+                    if let Some(text) = message.pointer("/params/item/text").and_then(Value::as_str)
+                    {
+                        crate::logging::conversation("assistant", text, "codex");
+                    }
+                }
                 crate::events::emit(&event_app, "codex", message);
             }
         });
@@ -1070,6 +1076,7 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
         return Err("说话人状态已变化，请重新建立安全会话".to_owned());
     }
     let thread_id = runtime.thread().await?;
+    crate::logging::conversation("user", text.trim(), "codex");
     let text = with_memory_context(&text);
     runtime
         .request(

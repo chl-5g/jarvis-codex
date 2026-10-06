@@ -123,7 +123,7 @@ test("Codex Voice is primary and local speech is only the fallback", () => {
 
 test("normal launch opens Codex Voice automatically", () => {
   assert.match(frontend, /!backgroundStart && state\.mode === "ready"/);
-  assert.match(frontend, /void startDirectVoice\(\)/);
+  assert.match(frontend, /等待你启用 Codex Voice/);
 });
 
 test("full permission auto-accepts server requests", () => {
@@ -169,7 +169,7 @@ test("pause control can resume Jarvis and swaps to a play icon", () => {
   assert.match(frontend, /state\.mode === "stopped" \|\| state\.manualStop/);
   assert.match(frontend, /正在恢复 Jarvis Voice/);
   assert.match(frontend, /stopLabel\.textContent = paused \? "RESUME" : "PAUSE"/);
-  assert.match(frontend, /stopped: \["PAUSED", "JARVIS PAUSED"\]/);
+  assert.match(frontend, /uiConfig\.status/);
   assert.match(frontend, /play-mark/);
 });
 

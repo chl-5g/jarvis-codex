@@ -1,0 +1,12 @@
+{
+  "status": {
+    "booting": ["INITIALIZING", "SYSTEM BOOT"],
+    "ready": ["READY", "CODEX VOICE STANDBY"],
+    "voice-starting": ["VOICE LINKING", "OPENING CODEX VOICE"],
+    "listening": ["LISTENING", "OFFICIAL VOICE ONLINE"],
+    "working": ["WORKING", "TASK EXECUTION"],
+    "speaking": ["JARVIS SPEAKING", "VOICE OUTPUT"],
+    "degraded": ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"],
+    "stopped": ["PAUSED", "JARVIS PAUSED"]
+  }
+}

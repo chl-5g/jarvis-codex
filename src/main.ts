@@ -1473,23 +1473,14 @@ if (currentWindow) {
       appendStreamLine("端侧模型未发现，继续使用原生 Codex Voice", "system");
     }
     const backgroundStart = await invoke<boolean>("startup_is_background");
-    if (!backgroundStart) {
-      const microphoneAuthorization = await invoke<string>("request_microphone_permission");
-      if (microphoneAuthorization !== "authorized") {
-        setMode("degraded");
-        banner.hidden = false;
-        $("#degraded-copy").textContent =
-          "请在系统设置 → 隐私与安全性 → 麦克风中允许 Jarvis Codex。";
-      }
-    }
+    // Permissions are requested lazily by the capability that needs them.
+    // Startup only checks the existing state and never opens a permission prompt.
     await armWakeListener();
     updateVoiceInfo(await invoke<DirectVoice>("direct_voice_status"));
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
     } else if (!backgroundStart && state.mode === "ready") {
-      // A normal launch should be immediately usable. The wake listener is
-      // still used for later re-entry after the session is stopped.
-      void startDirectVoice();
+      response.textContent = "Jarvis 已启动，等待你启用 Codex Voice。";
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {

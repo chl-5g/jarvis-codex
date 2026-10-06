@@ -35,6 +35,16 @@ pub fn text(stream: &str, message: &str) {
     append(stream, &Entry { message });
 }
 
+pub fn conversation(role: &str, text: &str, source: &str) {
+    #[derive(Serialize)]
+    struct Entry<'a> {
+        role: &'a str,
+        source: &'a str,
+        text: &'a str,
+    }
+    append("conversation", &Entry { role, source, text });
+}
+
 pub fn init() {
     text("jarvis-runtime", "Jarvis process started");
     std::panic::set_hook(Box::new(|panic| {

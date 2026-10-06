@@ -74,6 +74,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
     if text.is_empty() {
         return Err("端侧模型 输入不能为空".to_owned());
     }
+    crate::logging::conversation("user", text, "on-device-model");
     let store = crate::memory::MemoryStore::default();
     let memory = store.recall(text, 4_000);
     let working = store.read_working(2_000);
@@ -120,6 +121,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
                 &format!("User: {text}\nJarvis: {}", response.content.trim()),
                 &["jarvis".to_owned(), "qwen".to_owned()],
             );
+            crate::logging::conversation("assistant", response.content.trim(), "on-device-model");
             return Ok(response.content);
         }
         if round == MAX_TOOL_ROUNDS {
@@ -174,7 +176,7 @@ async fn request_round(
     reasoning: bool,
 ) -> Result<QwenRound, String> {
     let tools_enabled = !schemas.is_empty() && env_flag("JARVIS_ON_DEVICE_TOOLS", true);
-    let endpoint = endpoint();
+    let endpoint = resolve_endpoint().await;
     let model = std::env::var("JARVIS_ON_DEVICE_MODEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -290,7 +292,7 @@ async fn discover_model(endpoint: &str) -> Option<String> {
 }
 
 pub async fn detect_model() -> Result<String, String> {
-    let endpoint = endpoint();
+    let endpoint = resolve_endpoint().await;
     discover_model(&endpoint)
         .await
         .ok_or_else(|| "端侧模型接口不可用或未返回模型".to_owned())
@@ -301,6 +303,18 @@ fn endpoint() -> String {
         return format!("{}/messages", base.trim_end_matches('/'));
     }
     std::env::var("JARVIS_ON_DEVICE_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned())
+}
+
+async fn resolve_endpoint() -> String {
+    let configured = endpoint();
+    if discover_model(&configured).await.is_some() {
+        return configured;
+    }
+    let fallback = "http://127.0.0.1:8080/v1/chat/completions".to_owned();
+    if discover_model(&fallback).await.is_some() {
+        return fallback;
+    }
+    configured
 }
 
 fn collect_round(round: &mut QwenRound, value: &Value, app: Option<&AppHandle>) {
