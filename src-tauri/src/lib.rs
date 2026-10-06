@@ -1481,6 +1481,31 @@ fn memory_status() -> memory::MemoryStatus {
     memory_store().status()
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WakeMemoryStatus {
+    initial_context_chars: usize,
+    working_context_chars: usize,
+}
+
+#[tauri::command]
+fn prepare_wake_context() -> WakeMemoryStatus {
+    let initial = memory_store().initial_context(8_000);
+    let working = memory_store().read_working(2_000);
+    let status = WakeMemoryStatus {
+        initial_context_chars: initial.chars().count(),
+        working_context_chars: working.chars().count(),
+    };
+    logging::text(
+        "jarvis-runtime",
+        &format!(
+            "wake memory loaded: initial={} chars, working={} chars",
+            status.initial_context_chars, status.working_context_chars
+        ),
+    );
+    status
+}
+
 #[tauri::command]
 fn memory_recall(query: String) -> String {
     memory_store().recall(&query, 4_000)
@@ -1893,6 +1918,7 @@ pub fn run() {
             send_text,
             cipherpipe_send,
             memory_status,
+            prepare_wake_context,
             memory_recall,
             memory_save_core,
             memory_save_episode,

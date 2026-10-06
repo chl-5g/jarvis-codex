@@ -8,6 +8,7 @@ const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.ur
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
 const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
 const promptsConfig = await readFile(new URL("../config/prompts.json", import.meta.url), "utf8");
+const uiConfig = await readFile(new URL("../config/ui.json", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
@@ -31,6 +32,8 @@ const tauriConfig = await readFile(
   new URL("../src-tauri/tauri.conf.json", import.meta.url),
   "utf8",
 );
+const infoPlist = await readFile(new URL("../src-tauri/Info.plist", import.meta.url), "utf8");
+const installScript = await readFile(new URL("../scripts/install-release.sh", import.meta.url), "utf8");
 const codexWrapper = await readFile(
   new URL("../src-tauri/codex", import.meta.url),
   "utf8",
@@ -111,6 +114,22 @@ test("wake phrase opens the same direct Voice path", () => {
   assert.match(wakeHelper, /"--test-wake"/);
 });
 
+test("wake reads memory before opening Voice", () => {
+  assert.match(frontend, /prepare_wake_context/);
+  assert.match(frontend, /await prepareWakeMemory\(\)/);
+  assert.match(backend, /wake memory loaded/);
+});
+
+test("Voice sleeps after configured inactivity and waits for wake", () => {
+  assert.match(frontend, /voiceIdleSleepTimer/);
+  assert.match(frontend, /voiceIdleSleepMs/);
+  assert.match(frontend, /VITE_VOICE_IDLE_SLEEP_MS/);
+  assert.match(frontend, /sleepVoiceAfterIdle\(\)/);
+  assert.match(frontend, /await armWakeListener\(\)/);
+  assert.match(frontend, /VOICE_IDLE_SLEEP_MS/);
+  assert.match(uiConfig, /"voiceIdleSleepMs": 300000/);
+});
+
 test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
   assert.match(wakeConfig, /你好jarvis/);
   assert.match(wakeConfig, /"你好"/);
@@ -160,6 +179,14 @@ test("full permission auto-accepts server requests", () => {
   assert.match(frontend, /PERMISSION_KEY = "jarvis\.permissionMode:v2"/);
   assert.match(frontend, /permissionMode === "full"/);
   assert.match(frontend, /resolve_server_request.*approved: true/);
+});
+
+test("macOS file access uses one installed app identity", () => {
+  assert.match(infoPlist, /NSDesktopFolderUsageDescription/);
+  assert.match(infoPlist, /NSDocumentsFolderUsageDescription/);
+  assert.match(infoPlist, /NSDownloadsFolderUsageDescription/);
+  assert.match(installScript, /\/Applications\/Jarvis Codex\.app/);
+  assert.match(installScript, /ditto/);
 });
 
 test("text input button is labelled SEND", () => {

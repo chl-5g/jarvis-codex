@@ -34,6 +34,7 @@ type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
 type ModelMode = "hybrid" | "qwen" | "codex";
 type QwenEvent = { delta?: string; done?: boolean; error?: string };
+type WakeMemoryStatus = { initialContextChars: number; workingContextChars: number };
 type BridgeStatus = { enabled: boolean; bindAddress: string; port?: number; paired: boolean; endpoint?: string };
 type BridgeEnableResult = { status: BridgeStatus; pairingToken?: string };
 type JarvisEvent = {
@@ -70,6 +71,7 @@ const state = {
 const WORKSPACE_KEY = "jarvis.workspace";
 const PROJECT_ROOT = import.meta.env.VITE_PROJECTPATH || pathsConfig.projectRoot;
 const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
+const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEEP_MS ?? "", 10) || uiConfig.timeouts.voiceIdleSleepMs;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
@@ -120,6 +122,8 @@ let lastUserTurnText = "";
 let qwenAnswerBuffer = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
+let voiceIdleSleepTimer: number | null = null;
+let voiceIdleSleepInFlight = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -676,6 +680,41 @@ function updateVoiceInfo(info: DirectVoice) {
     $("#thread-id").textContent = info.threadId;
     localStorage.setItem(`${THREAD_KEY_PREFIX}${workspace}`, info.threadId);
   }
+  if (info.voiceActive) resetVoiceIdleSleepTimer();
+  else clearVoiceIdleSleepTimer();
+}
+
+function clearVoiceIdleSleepTimer() {
+  if (voiceIdleSleepTimer !== null) {
+    window.clearTimeout(voiceIdleSleepTimer);
+    voiceIdleSleepTimer = null;
+  }
+}
+
+function resetVoiceIdleSleepTimer() {
+  clearVoiceIdleSleepTimer();
+  if (!state.directVoice?.voiceActive || voiceIdleSleepInFlight) return;
+  voiceIdleSleepTimer = window.setTimeout(() => {
+    void sleepVoiceAfterIdle();
+  }, VOICE_IDLE_SLEEP_MS);
+}
+
+async function sleepVoiceAfterIdle() {
+  if (voiceIdleSleepInFlight || !state.directVoice?.voiceActive) return;
+  voiceIdleSleepInFlight = true;
+  clearVoiceIdleSleepTimer();
+  appendStreamLine(uiConfig.messages.voiceIdleSleep, "system");
+  response.textContent = uiConfig.messages.voiceIdleSleep;
+  try {
+    await stopDirectVoice();
+    setMode("ready");
+    await armWakeListener();
+  } catch (error) {
+    appendStreamLine(`${uiConfig.messages.voiceIdleSleepFailed}：${String(error)}`, "error");
+    setMode("degraded");
+  } finally {
+    voiceIdleSleepInFlight = false;
+  }
 }
 
 async function handle(message: Message) {
@@ -717,6 +756,7 @@ async function handle(message: Message) {
     appendStreamLine("Codex Voice 已连接", "system");
     response.textContent = "Codex 官方 Voice 已上线。你现在可以直接和 Jarvis 对话。";
   } else if (method === "thread/realtime/transcript/delta") {
+    resetVoiceIdleSleepTimer();
     const delta = typeof params?.delta === "string" ? params.delta : "";
     if (params?.role === "assistant") {
       assistantTranscriptBuffer += delta;
@@ -1014,6 +1054,14 @@ async function startDirectVoice({ coldStart = false } = {}) {
   }
 }
 
+async function prepareWakeMemory() {
+  const status = await invoke<WakeMemoryStatus>("prepare_wake_context");
+  appendStreamLine(
+    `${uiConfig.messages.wakeMemoryLoaded} · ${status.initialContextChars + status.workingContextChars} 字符`,
+    "system",
+  );
+}
+
 async function waitForVoiceActive(timeout = 15_000) {
   const deadline = Date.now() + timeout;
   while (!state.directVoice?.voiceActive) {
@@ -1118,7 +1166,7 @@ if (currentWindow) {
       }
     }
   });
-  await listen<WakeEvent>("jarvis-wake", ({ payload }) => {
+  await listen<WakeEvent>("jarvis-wake", async ({ payload }) => {
     transcript.textContent = "“嗨，Jarvis”";
     appendStreamLine("收到唤醒词：嗨 Jarvis", "user");
     state.manualStop = false;
@@ -1143,6 +1191,11 @@ if (currentWindow) {
       return;
     }
     banner.hidden = true;
+    try {
+      await prepareWakeMemory();
+    } catch (error) {
+      appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
+    }
     void startDirectVoice({ coldStart: payload.cold === true });
   });
 }
@@ -1153,6 +1206,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   lastUserTurnText = text;
   transcript.textContent = text;
   appendStreamLine(`文字指令：${text}`, "user");
+  resetVoiceIdleSleepTimer();
   input.value = "";
   if (!currentWindow) {
     response.textContent = "视觉预览：文字任务已切换为 Codex 工作态。";
