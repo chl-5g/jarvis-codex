@@ -1344,8 +1344,11 @@ async fn speak_text(
         }
         let model_dir = std::env::var_os("JARVIS_TTS_MODEL_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| resource_dir.join("../../../models/kokoro"));
-        let python = std::env::var_os("JARVIS_PYTHON").unwrap_or_else(|| "python3".into());
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join("Jarvis-codex/models/kokoro")
+            });
+        let python = offline_speech::python_path();
         Command::new(python)
             .args(["-u"])
             .arg(&script)

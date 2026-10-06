@@ -1,7 +1,7 @@
 //! Managed JSONL bridge for the offline speech-only Python worker.
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Manager};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -40,12 +40,16 @@ impl OfflineSpeech {
         if !script.is_file() {
             return Err(format!("语音 worker 不存在：{}", script.display()));
         }
-        let python = std::env::var_os("JARVIS_PYTHON").unwrap_or_else(|| "python3".into());
+        let python = python_path();
         let mut child = Command::new(python)
             .args(["-u"])
             .arg(script)
             .arg("--speech-worker")
-            .env("JARVIS_MODEL_ROOT", resource.join("../../../models"))
+            .env(
+                "JARVIS_MODEL_ROOT",
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join("Jarvis-codex/models"),
+            )
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
@@ -159,4 +163,22 @@ impl OfflineSpeech {
 }
 impl Drop for OfflineSpeech {
     fn drop(&mut self) {}
+}
+
+// Finder/LaunchServices launches do not inherit Start Jarvis.command's env.
+pub fn python_path() -> std::ffi::OsString {
+    if let Some(path) = std::env::var_os("JARVIS_PYTHON") {
+        return path;
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
+    for relative in [
+        "Jarvis-codex/.venv/bin/python",
+        "Documents/Codex/2026-10-05/ni/work/jarvis-venv/bin/python",
+    ] {
+        let path = home.join(relative);
+        if path.is_file() {
+            return path.into_os_string();
+        }
+    }
+    "python3".into()
 }

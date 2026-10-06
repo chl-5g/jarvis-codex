@@ -44,13 +44,13 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Wake Jarvis and work through Codex",
-    "resources": [
-      "wake-helper/JarvisWakeListener.app/",
-      "codex",
-      "local_tts.py",
-      "../controller.py",
-      "speech_worker.py"
-    ],
+    "resources": {
+      "wake-helper/JarvisWakeListener.app/": "wake-helper/JarvisWakeListener.app/",
+      "codex": "codex",
+      "local_tts.py": "local_tts.py",
+      "speech_worker.py": "speech_worker.py",
+      "../controller.py": "controller.py"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",

@@ -4,6 +4,7 @@ import sys
 if __name__ == '__main__':
     if sys.argv[1:] == ['--speech-worker']:
         sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent / 'src-tauri'))
+        sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
         from speech_worker import serve
         serve()
         raise SystemExit(0)
