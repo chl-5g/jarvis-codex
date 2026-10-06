@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./style.css";
+import { shouldUseLocalQwen } from "./text-routing.mjs";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -1157,8 +1158,11 @@ $("#command-form").addEventListener("submit", async (event) => {
     return;
   }
   await ensureWorkspace();
-  const useLocalQwen = modelMode === "qwen"
-    || (modelMode === "hybrid" && !state.directVoice?.voiceActive);
+  const useLocalQwen = shouldUseLocalQwen({
+    modelMode,
+    voiceActive: Boolean(state.directVoice?.voiceActive),
+    text,
+  });
   if (state.directVoice?.voiceActive && !useLocalQwen) {
     // Realtime appendText only feeds the experimental audio session input and
     // does not start a normal Codex task turn. Typed commands must use the

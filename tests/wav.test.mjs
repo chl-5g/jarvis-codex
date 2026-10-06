@@ -110,7 +110,7 @@ test("workspace is initialized before voice or text turns", () => {
   assert.match(frontend, /let workspace = PROJECT_WORKSPACE/);
   assert.match(frontend, /value !== "\/"/);
   assert.match(frontend, /await ensureWorkspace\(\);\n  voiceStartInFlight/);
-  assert.match(frontend, /await ensureWorkspace\(\);\n  const useLocalQwen/);
+  assert.match(frontend, /await ensureWorkspace\(\);\n  const useLocalQwen = shouldUseLocalQwen/);
   assert.match(frontend, /savedWorkspace !== "\/"/);
 });
 
@@ -146,6 +146,10 @@ test("voice button is only a microphone mute toggle", () => {
   assert.doesNotMatch(micHandler, /startDirectVoice|toggleVoiceMute/);
   assert.match(frontend, /class="slash-mark"/);
   assert.match(style, /\.mic \.slash-mark/);
+});
+
+test("action and URL text bypass local Qwen in hybrid mode", () => {
+  assert.match(frontend, /shouldUseLocalQwen/);
 });
 
 test("idle text input uses the Codex task thread", () => {
@@ -339,4 +343,13 @@ test("wake activates the macOS app before focusing the Jarvis window", () => {
   assert.match(backend, /set_always_on_top\(true\)/);
   assert.match(backend, /set_always_on_top\(false\)/);
   assert.match(backend, /raise_jarvis_window\(&app\)/);
+});
+
+test("text routing sends action and URL prompts to Codex", async () => {
+  const routing = await import("../src/text-routing.mjs");
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "今天天气怎么样" }), true);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "请访问 https://github.com/chl-5g/cipherpipe" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "打开这个仓库" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "qwen", voiceActive: false, text: "请访问 https://example.com" }), true);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: true, text: "普通问题" }), false);
 });
