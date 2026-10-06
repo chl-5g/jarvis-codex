@@ -49,7 +49,8 @@
       "codex": "codex",
       "local_tts.py": "local_tts.py",
       "speech_worker.py": "speech_worker.py",
-      "../controller.py": "controller.py"
+      "../controller.py": "controller.py",
+      "cipherpipe_bridge.py": "cipherpipe_bridge.py"
     },
     "macOS": {
       "minimumSystemVersion": "13.0",

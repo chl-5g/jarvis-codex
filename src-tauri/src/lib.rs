@@ -19,6 +19,7 @@ use tokio::{
 };
 
 mod bridge;
+mod cipherpipe;
 mod events;
 mod knowledge;
 mod memory;
@@ -54,6 +55,7 @@ struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
     offline_speech: Arc<offline_speech::OfflineSpeech>,
+    cipherpipe: Arc<cipherpipe::CipherPipe>,
     speaker_access: RwLock<SpeakerAccess>,
     cold_wake_pending: AtomicBool,
     background_start: bool,
@@ -1080,6 +1082,16 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+async fn cipherpipe_send(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+    peer: Option<String>,
+) -> Result<(), String> {
+    state.cipherpipe.send(&app, &text, peer.as_deref()).await
+}
+
 fn with_memory_context(text: &str) -> String {
     let context = memory_store().recall(text, 4_000);
     let working = memory_store().read_working(2_000);
@@ -1446,6 +1458,7 @@ async fn resolve_server_request(
 #[tauri::command]
 async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
     stop_speech(&state).await;
+    state.cipherpipe.stop().await;
     terminate_runtime(&state).await
 }
 
@@ -1462,6 +1475,7 @@ pub fn run() {
             runtime: Mutex::new(None),
             speech: Mutex::new(None),
             offline_speech: offline_speech::OfflineSpeech::new(),
+            cipherpipe: cipherpipe::CipherPipe::new(),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
@@ -1485,6 +1499,7 @@ pub fn run() {
             stop_codex_voice,
             append_codex_voice_text,
             send_text,
+            cipherpipe_send,
             memory_status,
             memory_recall,
             memory_save_core,

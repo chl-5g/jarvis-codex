@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./style.css";
-import { shouldUseLocalQwen } from "./text-routing.mjs";
+import { parseCipherPipeCommand, shouldUseLocalQwen } from "./text-routing.mjs";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -1046,6 +1046,10 @@ function setVoiceMuted(muted: boolean) {
 
 if (currentWindow) {
   await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
+    if (payload.kind === "cipherpipe-message") {
+      appendStreamLine(`CipherPipe：${payload.message ?? payload.output ?? "收到消息"}`, "assistant", "cipherpipe");
+      return;
+    }
     if (payload.kind === "workflow" || payload.kind === "task") {
       const id = payload.runId ?? payload.taskId ?? payload.workflowId ?? payload.kind;
       const phase = payload.phase ?? "event";
@@ -1158,6 +1162,21 @@ $("#command-form").addEventListener("submit", async (event) => {
     return;
   }
   await ensureWorkspace();
+  const cipherpipeText = parseCipherPipeCommand(text);
+  if (cipherpipeText) {
+    setMode("working");
+    appendStreamLine("正在通过 CipherPipe 发送加密消息", "task");
+    try {
+      await invoke("cipherpipe_send", { text: cipherpipeText });
+      appendStreamLine("CipherPipe 消息已交给本机 Hub", "system");
+      response.textContent = "CipherPipe 消息已发送。";
+    } catch (error) {
+      response.textContent = `CipherPipe 发送失败：${String(error)}`;
+      appendStreamLine(response.textContent, "error");
+    }
+    setMode("ready");
+    return;
+  }
   const useLocalQwen = shouldUseLocalQwen({
     modelMode,
     voiceActive: Boolean(state.directVoice?.voiceActive),

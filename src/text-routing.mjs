@@ -8,3 +8,8 @@ export function shouldUseLocalQwen({ modelMode, voiceActive, text }) {
   return modelMode === "qwen"
     || (modelMode === "hybrid" && !voiceActive && !prefersCodexTask(text));
 }
+
+export function parseCipherPipeCommand(text) {
+  const match = text.trim().match(/^(?:发给\s*CipherPipe|cipherpipe)[:：]\s*(.+)$/i);
+  return match ? match[1].trim() : null;
+}

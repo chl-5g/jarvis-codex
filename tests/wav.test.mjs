@@ -110,7 +110,7 @@ test("workspace is initialized before voice or text turns", () => {
   assert.match(frontend, /let workspace = PROJECT_WORKSPACE/);
   assert.match(frontend, /value !== "\/"/);
   assert.match(frontend, /await ensureWorkspace\(\);\n  voiceStartInFlight/);
-  assert.match(frontend, /await ensureWorkspace\(\);\n  const useLocalQwen = shouldUseLocalQwen/);
+  assert.match(frontend, /await ensureWorkspace\(\);[\s\S]*const useLocalQwen = shouldUseLocalQwen/);
   assert.match(frontend, /savedWorkspace !== "\/"/);
 });
 
@@ -352,4 +352,6 @@ test("text routing sends action and URL prompts to Codex", async () => {
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "打开这个仓库" }), false);
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "qwen", voiceActive: false, text: "请访问 https://example.com" }), true);
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: true, text: "普通问题" }), false);
+  assert.equal(routing.parseCipherPipeCommand("发给 CipherPipe：请回复"), "请回复");
+  assert.equal(routing.parseCipherPipeCommand("普通问题"), null);
 });
