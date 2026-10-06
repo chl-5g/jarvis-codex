@@ -347,10 +347,10 @@ test("wake activates the macOS app before focusing the Jarvis window", () => {
 
 test("text routing sends action and URL prompts to Codex", async () => {
   const routing = await import("../src/text-routing.mjs");
-  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "今天天气怎么样" }), true);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "今天天气怎么样" }), false);
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "请访问 https://github.com/chl-5g/cipherpipe" }), false);
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "打开这个仓库" }), false);
-  assert.equal(routing.shouldUseLocalQwen({ modelMode: "qwen", voiceActive: false, text: "请访问 https://example.com" }), true);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "qwen", voiceActive: false, text: "请访问 https://example.com" }), false);
   assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: true, text: "普通问题" }), false);
   assert.equal(routing.parseCipherPipeCommand("发给 CipherPipe：请回复"), "请回复");
   assert.equal(routing.parseCipherPipeCommand("普通问题"), null);

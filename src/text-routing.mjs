@@ -5,8 +5,7 @@ export function prefersCodexTask(text) {
 }
 
 export function shouldUseLocalQwen({ modelMode, voiceActive, text }) {
-  return modelMode === "qwen"
-    || (modelMode === "hybrid" && !voiceActive && !prefersCodexTask(text));
+  return modelMode === "qwen" && !voiceActive && !prefersCodexTask(text);
 }
 
 export function parseCipherPipeCommand(text) {

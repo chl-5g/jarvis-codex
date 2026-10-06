@@ -1197,6 +1197,19 @@ $("#command-form").addEventListener("submit", async (event) => {
     void invoke("speak_text", { text: message }).catch(() => undefined);
     return;
   }
+  if (state.directVoice?.voiceActive) {
+    setMode("working");
+    response.textContent = "正在交给 Codex Voice 处理文字指令…";
+    try {
+      await invoke("append_codex_voice_text", { text });
+      appendStreamLine("文字指令已进入原生 Codex Voice", "system");
+    } catch (error) {
+      response.textContent = `Codex Voice 文字输入失败：${String(error)}`;
+      appendStreamLine(response.textContent, "error");
+      setMode("degraded");
+    }
+    return;
+  }
   if (useLocalQwen) {
     qwenAnswerBuffer = "";
     setMode("working");
@@ -1210,11 +1223,7 @@ $("#command-form").addEventListener("submit", async (event) => {
       sealStreamLine("qwen-assistant");
       qwenAnswerBuffer = "";
       lastUserTurnText = "";
-      setMode("speaking");
-      await invoke("speak_text", { text: finalAnswer }).catch((error) => {
-        appendStreamLine(`本地语音失败：${String(error)}`, "error");
-      });
-      if (state.mode === "speaking") setMode("ready");
+      setMode("ready");
       return;
     } catch (error) {
       qwenAnswerBuffer = "";

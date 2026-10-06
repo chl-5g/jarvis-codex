@@ -13,7 +13,7 @@ use tokio::{
     process::Command,
 };
 
-const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:4000/v1/chat/completions";
+const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:4000/v1/messages";
 const DEFAULT_TIMEOUT_SECONDS: &str = "20";
 const MAX_TOOL_ROUNDS: usize = 4;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
@@ -182,15 +182,25 @@ async fn request_round(
         .unwrap_or_else(|| "default".to_owned());
     let mut body = json!({
         "model": model,
-        "messages": messages,
+        "messages": anthropic_messages(messages),
         "stream": true,
         "max_tokens": 1024,
-        "temperature": 0.4,
-        "chat_template_kwargs": {"enable_thinking": reasoning, "reasoning_effort": if reasoning { "medium" } else { "none" }, "preserve_thinking": false}
+        "temperature": 0.4
     });
     if tools_enabled {
-        body["tools"] = Value::Array(schemas);
-        body["tool_choice"] = Value::String("auto".to_owned());
+        body["tools"] = Value::Array(schemas.into_iter().map(|schema| {
+            json!({"name": schema.pointer("/function/name").and_then(Value::as_str).unwrap_or("tool"), "description": schema.pointer("/function/description").and_then(Value::as_str).unwrap_or(""), "input_schema": schema.pointer("/function/parameters").cloned().unwrap_or_else(|| json!({"type":"object"}))})
+        }).collect());
+    }
+    if let Some(system) = messages
+        .first()
+        .and_then(|v| v.get("content"))
+        .and_then(Value::as_str)
+    {
+        body["system"] = json!(system);
+    }
+    if reasoning {
+        body["thinking"] = json!({"type":"enabled", "budget_tokens": 1024});
     }
     let timeout_seconds = std::env::var("JARVIS_ON_DEVICE_TIMEOUT_SECONDS")
         .unwrap_or_else(|_| DEFAULT_TIMEOUT_SECONDS.to_owned());
@@ -254,6 +264,14 @@ async fn request_round(
     Ok(round)
 }
 
+fn anthropic_messages(messages: &[Value]) -> Value {
+    Value::Array(messages.iter().filter_map(|message| {
+        let role = message.get("role").and_then(Value::as_str)?;
+        if role == "system" { return None; }
+        Some(json!({"role": if role == "tool" { "user" } else { role }, "content": message.get("content").cloned().unwrap_or(Value::String(String::new()))}))
+    }).collect())
+}
+
 async fn discover_model(endpoint: &str) -> Option<String> {
     let models_endpoint = endpoint
         .strip_suffix("/chat/completions")
@@ -280,12 +298,57 @@ pub async fn detect_model() -> Result<String, String> {
 
 fn endpoint() -> String {
     if let Ok(base) = std::env::var("JARVIS_LITELLM_BASE_URL") {
-        return format!("{}/chat/completions", base.trim_end_matches('/'));
+        return format!("{}/messages", base.trim_end_matches('/'));
     }
     std::env::var("JARVIS_ON_DEVICE_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned())
 }
 
 fn collect_round(round: &mut QwenRound, value: &Value, app: Option<&AppHandle>) {
+    if value.get("type").and_then(Value::as_str) == Some("content_block_start") {
+        if let Some(block) = value.get("content_block") {
+            if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                round.tool_calls.push(ToolCallAccumulator {
+                    id: block
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    name: block
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    arguments: String::new(),
+                });
+            }
+        }
+        return;
+    }
+    if value.get("type").and_then(Value::as_str) == Some("content_block_delta") {
+        let delta = value.get("delta").unwrap_or(&Value::Null);
+        match delta.get("type").and_then(Value::as_str) {
+            Some("text_delta") => {
+                if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                    round.content.push_str(text);
+                    if let Some(app) = app {
+                        emit_qwen_event(app, Some(text), false, None);
+                    }
+                }
+            }
+            Some("input_json_delta") => {
+                if let Some(call) = round.tool_calls.last_mut() {
+                    call.arguments.push_str(
+                        delta
+                            .get("partial_json")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    );
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
     let choice = value.pointer("/choices/0").unwrap_or(&Value::Null);
     let delta = choice.get("delta").unwrap_or(&Value::Null);
     if let Some(content) = delta
