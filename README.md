@@ -49,6 +49,16 @@ Jarvis does not simulate clicks in the Codex or ChatGPT applications, register
 a global hotkey, or create a separate GPT-Live session. It reuses the local
 Codex authentication and app-server runtime.
 
+## Personal Agent direction
+
+Jarvis is intended to be a personal agent execution layer rather than another
+chat window. Its most valuable distinction from hosted agents such as Meta
+Muse and general-purpose agent frameworks such as OpenClaw is giving the agent
+local, inspectable access to the user's permissions, memory, and connected
+interfaces. The model remains replaceable; the Rust runtime owns the durable
+memory, capability gateway, tool calls, audit events, and fallback routes that
+let an agent represent the user and get real work done.
+
 ## Visual evolution
 
 ### v0.1.x — holographic workstation
