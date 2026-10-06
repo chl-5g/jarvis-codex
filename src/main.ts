@@ -120,6 +120,7 @@ let lastUserTurnText = "";
 let qwenAnswerBuffer = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
+let capabilityTaskInFlight = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -133,6 +134,42 @@ function extractAgentText(value: unknown): string {
     if (text) return text;
   }
   return "";
+}
+
+function isSystemCapabilityRequest(text: string) {
+  const lower = text.toLowerCase();
+  return ["天气", "气温", "temperature", "weather", "位置", "在哪里", "哪个城市", "location", "摄像头", "相机", "camera"]
+    .some((keyword) => lower.includes(keyword));
+}
+
+async function routeVoiceCapabilityTask(text: string) {
+  if (capabilityTaskInFlight || !state.directVoice?.voiceActive) return;
+  capabilityTaskInFlight = true;
+  state.agentWorking = true;
+  appendStreamLine("语音系统请求切换到 Codex 能力任务线程", "task");
+  try {
+    await stopDirectVoice();
+    await ensureWorkspace();
+    state.session = await invoke<Session>("start_jarvis", {
+      cwd: workspace,
+      threadId: savedThreadId(),
+      permissionMode,
+      speakerAccess: state.speakerAccess,
+    });
+    localStorage.setItem(`${THREAD_KEY_PREFIX}${workspace}`, state.session.threadId);
+    $("#thread-id").textContent = state.session.threadId;
+    $("#workspace").textContent = state.session.cwd;
+    setMode("working");
+    await invoke("send_text", { text });
+  } catch (error) {
+    state.agentWorking = false;
+    response.textContent = `语音能力任务失败：${String(error)}`;
+    appendStreamLine(response.textContent, "error");
+    setMode("degraded");
+    await armWakeListener();
+  } finally {
+    capabilityTaskInFlight = false;
+  }
 }
 
 async function saveMemoryEpisode(title: string, summary: string, tags: string[]) {
@@ -744,6 +781,9 @@ async function handle(message: Message) {
       if (text) lastUserTurnText = text;
       userTranscriptBuffer = "";
       if (text) triggerCharacterAction("acknowledge");
+      if (text && isSystemCapabilityRequest(text)) {
+        void routeVoiceCapabilityTask(text);
+      }
     }
   } else if (method === "thread/realtime/itemAdded") {
     const itemType = String(params?.item?.type ?? "");

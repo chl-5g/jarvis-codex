@@ -58,6 +58,12 @@ test("Voice uses Codex app-server V3 WebRTC directly", () => {
   assert.doesNotMatch(frontend, /OPENAI_API_KEY|ChatGPT.*button|hotkey/i);
 });
 
+test("Voice capability requests use the audited Codex task path", () => {
+  assert.match(frontend, /routeVoiceCapabilityTask/);
+  assert.match(frontend, /isSystemCapabilityRequest/);
+  assert.match(backend, /current_location/);
+});
+
 test("bundled Codex runtime inherits the macOS proxy for realtime connectivity", () => {
   assert.match(tauriConfig, /"codex"/);
   assert.match(codexWrapper, /scutil --proxy/);
