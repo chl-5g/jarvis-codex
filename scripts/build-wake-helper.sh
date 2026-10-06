@@ -9,7 +9,9 @@ binary_dir="$app_dir/Contents/MacOS"
 signing_identity=${APPLE_SIGNING_IDENTITY:--}
 
 mkdir -p "$binary_dir"
+mkdir -p "$app_dir/Contents/Resources"
 cp "$helper_dir/Info.plist" "$app_dir/Contents/Info.plist"
+cp "$project_dir/config/wake.json" "$app_dir/Contents/Resources/wake.json"
 /usr/bin/swiftc \
   -O \
   -framework AppKit \

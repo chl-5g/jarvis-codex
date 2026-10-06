@@ -12,20 +12,16 @@ final class WakeListener {
     private let eventFile: URL?
     private let hostApp: URL?
 
-    private let phrases = [
-        "你好jarvis",
-        "hi jarvis",
-        "hijarvis",
-        "嗨jarvis",
-        "嘿jarvis",
-        "heyjarvis",
-        "嗨贾维斯",
-        "嘿贾维斯",
-        "你好贾维斯",
-        "hi贾维斯",
-    ]
+    private let phrases: [String]
 
     init() {
+        if let url = Bundle.main.url(forResource: "wake", withExtension: "json"),
+           let data = try? Data(contentsOf: url),
+           let config = try? JSONDecoder().decode(WakeConfig.self, from: data) {
+            phrases = config.phrases
+        } else {
+            phrases = []
+        }
         if
             let index = CommandLine.arguments.firstIndex(of: "--event-file"),
             CommandLine.arguments.indices.contains(index + 1)
@@ -221,6 +217,10 @@ final class WakeListener {
             fflush(stdout)
         }
     }
+}
+
+private struct WakeConfig: Decodable {
+    let phrases: [String]
 }
 
 let listener = WakeListener()

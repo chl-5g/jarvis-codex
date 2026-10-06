@@ -18,6 +18,7 @@ const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
   "utf8",
 );
+const wakeConfig = await readFile(new URL("../config/wake.json", import.meta.url), "utf8");
 const entitlements = await readFile(
   new URL("../src-tauri/Entitlements.plist", import.meta.url),
   "utf8",
@@ -99,10 +100,11 @@ test("wake phrase opens the same direct Voice path", () => {
 });
 
 test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
-  assert.match(wakeHelper, /"你好jarvis"/);
-  assert.match(wakeHelper, /"你好贾维斯"/);
-  assert.match(wakeHelper, /"hi jarvis"/);
-  assert.match(wakeHelper, /"hijarvis"/);
+  assert.match(wakeConfig, /你好jarvis/);
+  assert.match(wakeConfig, /你好贾维斯/);
+  assert.match(wakeConfig, /hi jarvis/);
+  assert.match(wakeConfig, /hijarvis/);
+  assert.match(wakeHelper, /forResource: "wake"/);
 });
 
 test("STOP suppresses transcript-tail handoffs and interrupts late turns", () => {
