@@ -5,6 +5,9 @@ export function prefersCodexTask(text) {
 }
 
 export function shouldUseLocalQwen({ modelMode, voiceActive, text }) {
+  // Online-first routing: local Qwen is an explicit offline/degraded route.
+  // The hybrid mode reaches the native Codex task path first and falls back
+  // only when that request cannot be submitted.
   return modelMode === "qwen" && !voiceActive && !prefersCodexTask(text);
 }
 

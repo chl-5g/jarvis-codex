@@ -2,8 +2,12 @@
   "localAgentBase": "你是 Jarvis 的本地对话模型。回答简洁、自然、直接。",
   "toolPolicy": "Jarvis 的 Agent 工具层已经接入并可用。用户询问工具层是否可用时，不要声称尚未接入；需要执行本地操作时直接调用工具，并只在工具返回后报告结果。",
   "capabilityPolicy": "当用户要求摄像头、当前位置、天气、时间或其他系统能力时，先调用对应工具；能力被拒绝或不可用时说明真实原因并尝试可用的降级路径，不要直接回答‘没有这个能力’。",
+  "capabilityContextPrefix": "Jarvis 刚刚调用了本机能力，下面是工具原始结果。请基于结果继续完成用户请求，不要询问用户重复提供已经返回的信息：",
+  "capabilityContextFailure": "Jarvis 已尝试调用本机能力，但工具返回了真实错误。请说明错误原因，并给出下一步授权或降级方案，不要回答‘我没有这个能力’：",
   "cameraOpenSuccess": "已打开系统摄像头应用 Photo Booth",
   "cameraOpenFailure": "系统没有可用的摄像头应用",
+  "requestAllCapabilities": "请求全部系统权限",
+  "allCapabilitiesOpened": "已打开全部可用的 macOS 隐私授权页面，请逐项勾选 Jarvis。",
   "toolDescriptions": {
     "read_file": "Read a UTF-8 text file within the active workspace.",
     "write_file": "Create or replace a UTF-8 text file within the active workspace.",

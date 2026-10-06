@@ -589,6 +589,58 @@ fn wake_helper_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("Jarvis 唤醒监听器未找到".to_owned())
 }
 
+async fn wake_speech_permission_status(app: &AppHandle) -> Result<String, String> {
+    let helper = wake_helper_path(app)?;
+    let event_file =
+        std::env::temp_dir().join(format!("jarvis-speech-status-{}.jsonl", std::process::id()));
+    let _ = fs::write(&event_file, "");
+    let mut child = Command::new("/usr/bin/open")
+        .args(["-n", "-W"])
+        .arg(&helper)
+        .args(["--args", "--status-only", "--event-file"])
+        .arg(&event_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("启动语音权限检查失败：{error}"))?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let content = fs::read_to_string(&event_file).unwrap_or_default();
+        for line in content.lines() {
+            let Ok(value) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            if value.get("type").and_then(Value::as_str) == Some("authorization") {
+                let status = value
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_owned();
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                let _ = fs::remove_file(&event_file);
+                return Ok(status);
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            let _ = fs::remove_file(&event_file);
+            return Err("语音识别权限检查超时".to_owned());
+        }
+        if child.try_wait().ok().flatten().is_some() {
+            let _ = fs::remove_file(&event_file);
+            return Err("语音识别权限检查进程提前退出".to_owned());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tauri::command]
+async fn speech_permission_status(app: AppHandle) -> Result<String, String> {
+    wake_speech_permission_status(&app).await
+}
+
 fn location_helper_path(app: &AppHandle) -> Result<PathBuf, String> {
     let relative = PathBuf::from("location-helper/JarvisLocationHelper.app");
     if let Ok(resource_dir) = app.path().resource_dir() {
@@ -761,6 +813,21 @@ async fn request_location(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 async fn request_capability(capability: String) -> Result<String, String> {
     open_capability_settings(&capability).await
+}
+
+#[tauri::command]
+async fn request_all_capabilities() -> Result<String, String> {
+    let mut opened = 0usize;
+    for capability in config::permission_capabilities() {
+        if open_capability_settings(&capability).await.is_ok() {
+            opened += 1;
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
+    }
+    if opened == 0 {
+        return Err("没有可打开的系统授权页面".to_owned());
+    }
+    Ok(config::prompt("allCapabilitiesOpened").to_owned())
 }
 
 pub(crate) async fn open_capability_settings(capability: &str) -> Result<String, String> {
@@ -1304,7 +1371,7 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
 }
 
 #[tauri::command]
-async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), String> {
+async fn send_text(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<(), String> {
     let speaker_access = effective_speaker_access(*state.speaker_access.read().await);
     if speaker_access == SpeakerAccess::Rejected {
         return Err("未识别的说话人".to_owned());
@@ -1315,6 +1382,7 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
     }
     let thread_id = runtime.thread().await?;
     crate::logging::conversation("user", text.trim(), "codex");
+    let text = with_capability_context(&app, &runtime, &text).await;
     let text = with_memory_context(&text);
     runtime
         .request(
@@ -1326,6 +1394,47 @@ async fn send_text(state: State<'_, AppState>, text: String) -> Result<(), Strin
         )
         .await?;
     Ok(())
+}
+
+async fn with_capability_context(app: &AppHandle, runtime: &CodexRuntime, text: &str) -> String {
+    let lower = text.to_lowercase();
+    let tool_name = if lower.contains("天气")
+        || lower.contains("气温")
+        || lower.contains("temperature")
+        || lower.contains("weather")
+    {
+        Some("current_weather")
+    } else if lower.contains("位置")
+        || lower.contains("在哪里")
+        || lower.contains("哪个城市")
+        || lower.contains("location")
+    {
+        Some("current_location")
+    } else if lower.contains("摄像头") || lower.contains("相机") || lower.contains("camera") {
+        Some("capture_camera")
+    } else {
+        None
+    };
+    let Some(tool_name) = tool_name else {
+        return text.to_owned();
+    };
+    let workspace = PathBuf::from(&runtime.workspace);
+    let result = tools::execute(app.clone(), &workspace, tool_name, json!({}), false).await;
+    if result.success {
+        format!(
+            "{text}\n\n{}\n{}",
+            config::prompt("capabilityContextPrefix"),
+            result.output
+        )
+    } else {
+        format!(
+            "{text}\n\n{}\n{}",
+            config::prompt("capabilityContextFailure"),
+            result
+                .error
+                .unwrap_or_else(|| "unknown capability error".to_owned())
+        )
+    }
 }
 
 #[tauri::command]
@@ -1759,8 +1868,10 @@ pub fn run() {
             startup_is_background,
             permission_status,
             request_microphone_permission,
+            speech_permission_status,
             request_location,
             request_capability,
+            request_all_capabilities,
             start_jarvis,
             start_codex_voice,
             stop_codex_voice,

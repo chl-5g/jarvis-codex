@@ -280,10 +280,10 @@ test("Codex, Qwen, tools, workflows, and tasks publish one local event envelope"
   assert.match(tasksBackend, /crate::events::emit/);
 });
 
-test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {
+test("Jarvis exposes online-first, local Qwen, and Codex model routes", () => {
   assert.match(frontend, /jarvis\.modelMode/);
   assert.match(frontend, /端侧模型/);
-  assert.match(frontend, /混合模式/);
+  assert.match(frontend, /在线优先/);
   assert.match(frontend, /Codex 原生/);
 });
 

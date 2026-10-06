@@ -1,4 +1,7 @@
 {
+  "actions": {
+    "requestAllCapabilities": "请求全部系统权限"
+  },
   "status": {
     "booting": ["INITIALIZING", "SYSTEM BOOT"],
     "ready": ["READY", "CODEX VOICE STANDBY"],

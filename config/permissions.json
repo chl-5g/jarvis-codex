@@ -1,6 +1,7 @@
 {
   "settingsUrls": {
     "microphone": "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    "speechRecognition": "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
     "camera": "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera",
     "location": "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
     "screenRecording": "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",

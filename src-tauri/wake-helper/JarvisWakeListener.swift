@@ -62,6 +62,9 @@ final class WakeListener {
             "type": "authorization",
             "status": authorizationName(currentAuthorization),
         ])
+        if CommandLine.arguments.contains("--status-only") {
+            exit(0)
+        }
         if currentAuthorization == .authorized {
             startRecognition()
             RunLoop.main.run()

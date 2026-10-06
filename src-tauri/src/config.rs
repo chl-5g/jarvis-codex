@@ -91,3 +91,11 @@ pub fn permission_settings_url(capability: &str) -> &'static str {
         .and_then(Value::as_str)
         .unwrap_or("")
 }
+
+pub fn permission_capabilities() -> Vec<String> {
+    permissions()
+        .get("settingsUrls")
+        .and_then(Value::as_object)
+        .map(|items| items.keys().cloned().collect())
+        .unwrap_or_default()
+}

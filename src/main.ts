@@ -84,7 +84,7 @@ const permissionLabels: Record<PermissionMode, string> = {
   full: "完全访问 · 高风险",
 };
 const modelModeLabels: Record<ModelMode, string> = {
-  hybrid: "混合模式 · Voice 优先，端侧模型兜底",
+  hybrid: "在线优先 · Codex，失败时端侧降级",
   qwen: "端侧模型 · 8080",
   codex: "Codex 原生 · 工作线程",
 };
@@ -204,7 +204,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>混合模式</b><small>Voice 在线时用 Codex，文字任务优先端侧模型</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>端侧模型</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>模型路由修改立即保存；混合模式在语音关闭时自动使用端侧模型。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><button id="request-all-permissions" type="button">${uiConfig.actions.requestAllCapabilities}</button><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>在线优先</b><small>所有任务先走原生 Codex，离线或失败时端侧降级</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>端侧模型</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>在线优先模式先使用官方 Codex；只有 Codex 不可用时才使用端侧模型。端侧模型可手动强制启用。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -1336,6 +1336,16 @@ $("#settings").addEventListener("click", () => {
   void refreshBridgeStatus();
 });
 $("#close-settings").addEventListener("click", () => settings.close());
+$("#request-all-permissions").addEventListener("click", async () => {
+  try {
+    const message = await invoke<string>("request_all_capabilities");
+    appendStreamLine(message, "system");
+    response.textContent = message;
+  } catch (error) {
+    appendStreamLine(String(error), "error");
+    response.textContent = String(error);
+  }
+});
 $("#bridge-enable").addEventListener("click", async () => {
   const bindAddress = bridgeBind.value.trim() || "127.0.0.1";
   const pairingToken = localStorage.getItem(BRIDGE_TOKEN_KEY);
@@ -1475,11 +1485,18 @@ if (currentWindow) {
       appendStreamLine("端侧模型未发现，继续使用原生 Codex Voice", "system");
     }
     const backgroundStart = await invoke<boolean>("startup_is_background");
-    // Read capability state only. Starting the wake helper would prompt for
-    // microphone/speech access during every application launch.
+    // Read capability state before arming the listener. macOS only prompts for
+    // Speech Recognition the first time; later launches reuse the decision.
     const permissions = await invoke<{ microphone: string; speechRecognition: string; location: string }>("permission_status");
-    state.wake = { enabled: false, ready: false, authorization: permissions.microphone };
-    $("#wake-auth").textContent = permissions.microphone;
+    const speechPermission = await invoke<string>("speech_permission_status").catch(() => "unknown");
+    state.wake = { enabled: false, ready: false, authorization: permissions.microphone === "authorized" ? speechPermission : permissions.microphone };
+    $("#wake-auth").textContent = state.wake.authorization;
+    // The wake listener needs Speech Recognition. Ask macOS only when this
+    // permission is still undecided; after the one-time decision, startup
+    // reads the status and never shows the prompt again.
+    if (!backgroundStart) {
+      await armWakeListener();
+    }
     updateVoiceInfo(await invoke<DirectVoice>("direct_voice_status"));
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
