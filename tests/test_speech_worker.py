@@ -71,13 +71,10 @@ class ProtocolTests(unittest.TestCase):
         time.sleep(.2)
         self.p.stdin.close()
         self.assertEqual(self.p.wait(timeout=3), 0)
-    def test_controller_worker_has_no_legacy_side_effects(self):
-        result = subprocess.run([sys.executable, str(ROOT / 'controller.py'), '--speech-worker'], input='{"id":1,"op":"status"}\n', text=True, capture_output=True, timeout=5)
+    def test_speech_worker_has_no_legacy_side_effects(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'src-tauri/speech_worker.py')], input='{"id":1,"op":"status"}\n', text=True, capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(json.loads(result.stdout)['ok'])
-    def test_controller_requires_explicit_mode(self):
-        result = subprocess.run([sys.executable, str(ROOT / 'controller.py')], capture_output=True, timeout=3)
-        self.assertNotEqual(result.returncode, 0)
 
 if __name__ == '__main__':
     unittest.main()

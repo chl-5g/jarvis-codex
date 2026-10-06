@@ -1162,7 +1162,8 @@ fn default_workspace() -> Result<String, String> {
                 .map_err(|error| format!("无法读取 JARVIS_WORKSPACE：{error}"));
         }
     }
-    let project_workspace = PathBuf::from(config::project_root()).join("agent-workspace");
+    let project_workspace =
+        PathBuf::from(config::project_root()).join(config::workspace_directory());
     if project_workspace.is_dir() {
         return project_workspace
             .canonicalize()

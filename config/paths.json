@@ -1,7 +1,7 @@
 {
   "projectRoot": "/Users/caihaolun/Jarvis-codex",
   "installedApp": "/Applications/Jarvis Codex.app",
-  "workspace": "agent-workspace",
+  "workspace": "workspace",
   "configDirectory": "config",
   "logDirectory": "logs"
 }

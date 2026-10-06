@@ -29,3 +29,10 @@ cargo clippy --all-targets --all-features -- -D warnings
 npm run web:build
 git diff --check
 ```
+
+## 本机 Agent 工作规则
+
+- 用户已授权立即执行已明确提出的任务，不要重复询问是否开始。
+- 需要 Computer Use 时先读取对应技能规范，只使用批准的交互通道；完成操作后重新读取应用状态验证结果。
+- 删除、改权限、修改系统设置、安装或运行下载的软件、发送私密数据、发送消息和付款等敏感动作，必须先请求明确确认。
+- 普通问答不需要 Computer Use；桌面操作必须检查、执行、验证，并如实报告未完成的部分。

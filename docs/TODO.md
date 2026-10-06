@@ -2,7 +2,7 @@
 
 ## 声纹采集与本地身份识别
 
-- 源码入口：`~/Jarvis-codex/controller.py`
+- 语音降级入口：Rust `offline_speech.rs` 管理 `src-tauri/speech_worker.py`；旧控制器已移除
 - 当前状态：语音控制器已有录音缓冲 `RECORDER`，但尚未接入声纹识别模块。
 - 目标：在 Whisper 转录的同时，将原始 PCM 音频分流给本地 Resemblyzer。
 - 安全要求：

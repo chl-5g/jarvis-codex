@@ -36,7 +36,7 @@ impl OfflineSpeech {
             .path()
             .resource_dir()
             .map_err(|e| format!("无法定位语音资源：{e}"))?;
-        let script = resource.join("controller.py");
+        let script = resource.join("speech_worker.py");
         if !script.is_file() {
             return Err(format!("语音 worker 不存在：{}", script.display()));
         }
@@ -44,7 +44,6 @@ impl OfflineSpeech {
         let mut child = Command::new(python)
             .args(["-u"])
             .arg(script)
-            .arg("--speech-worker")
             .env(
                 "JARVIS_MODEL_ROOT",
                 PathBuf::from(crate::config::project_root()).join("models"),

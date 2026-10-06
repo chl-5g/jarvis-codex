@@ -65,6 +65,13 @@ pub fn log_directory() -> String {
     format!("{root}/{directory}")
 }
 
+pub fn workspace_directory() -> &'static str {
+    paths()
+        .get("workspace")
+        .and_then(Value::as_str)
+        .unwrap_or("workspace")
+}
+
 pub fn connectors() -> Value {
     CONNECTORS
         .get_or_init(|| {

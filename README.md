@@ -9,13 +9,13 @@
 </p>
 
 <p align="center">
-  English · <a href="README.zh-CN.md">简体中文</a>
+  English · <a href="docs/README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Big-Guan/jarvis-codex/releases/latest">Download the latest DMG</a>
   ·
-  <a href="CONTRIBUTING.md">Contribute</a>
+  <a href="docs/CONTRIBUTING.md">Contribute</a>
 </p>
 
 <p align="center">
@@ -277,7 +277,7 @@ notarization, entitlement, and smoke-test requirements.
 - Full access must be selected explicitly.
 - Siri is not part of the runtime path.
 
-Please report vulnerabilities according to [SECURITY.md](SECURITY.md), not in a
+Please report vulnerabilities according to [SECURITY.md](docs/SECURITY.md), not in a
 public issue.
 
 ## License
@@ -288,5 +288,5 @@ Jarvis × Codex is released under the [GNU General Public License v3.0](LICENSE)
 
 Contributions are welcome. The `main` branch is protected and does not accept
 direct pushes. Contributors must fork the repository, create a branch in their
-fork, and open a pull request. Read [CONTRIBUTING.md](CONTRIBUTING.md) before
+fork, and open a pull request. Read [CONTRIBUTING.md](docs/CONTRIBUTING.md) before
 starting work.
