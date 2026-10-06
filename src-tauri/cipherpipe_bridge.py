@@ -9,7 +9,7 @@ async def main():
     p = argparse.ArgumentParser()
     p.add_argument("--proxy", required=True)
     p.add_argument("--keyfile", required=True)
-    p.add_argument("--peer", default="")
+    p.add_argument("--peer", default=os.environ.get("JARVIS_CIPHERPIPE_PEER", ""))
     args = p.parse_args()
     sys.path.insert(0, os.path.abspath(os.environ.get("JARVIS_CIPHERPIPE_ROOT", ".")))
     from backend.core.crypto import load_or_create_key
