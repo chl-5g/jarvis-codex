@@ -73,7 +73,7 @@ resumption, permission profiles, or interruption logic.
 ## How it works
 
 ```text
-JarvisWakeListener (on-device speech recognition)
+ JarvisWakeListener (Apple Speech Recognition)
         ↓
 Tauri / Rust host raises the Jarvis window
         ↓
@@ -258,7 +258,8 @@ notarization, entitlement, and smoke-test requirements.
 
 ## Privacy and security
 
-- Wake recognition requires on-device speech recognition.
+- Wake recognition uses Apple's Speech Recognition path, with the system able to
+  fall back to its Siri-style service when a local language pack is unavailable.
 - Microphone audio reaches Codex Voice only after wake.
 - Raw audio and login credentials are not stored by Jarvis.
 - The WebView uses a restrictive content security policy.

@@ -249,7 +249,7 @@ test("production configuration persists workspace and resumes threads", () => {
   assert.match(frontend, /jarvis\.threadId:/);
   assert.match(backend, /"thread\/resume"/);
   assert.match(backend, /validated_workspace/);
-  assert.match(wakeHelper, /requiresOnDeviceRecognition = true/);
+  assert.match(wakeHelper, /requiresOnDeviceRecognition = false/);
 });
 
 test("user can create a fresh Codex thread without deleting history", () => {
