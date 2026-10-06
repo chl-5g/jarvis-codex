@@ -82,8 +82,8 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(codexWrapper, /model=gpt-5\.6-sol/);
   assert.match(backend, /JARVIS_MODEL: &str = "gpt-5\.6-sol"/);
   assert.match(backend, /"model": JARVIS_MODEL/);
-  assert.match(backend, /directly use Codex's native file-change and command-execution tools/);
-  assert.match(backend, /Do not route direct file edits through Obsidian or any other GUI/);
+  assert.match(promptsConfig, /directly use Codex's native file-change and command-execution tools/);
+  assert.match(promptsConfig, /Do not route direct file edits through Obsidian or any other GUI/);
 });
 
 test("bundled Codex runtime prefers one stable local CLI identity", () => {
@@ -128,6 +128,13 @@ test("Voice sleeps after configured inactivity and waits for wake", () => {
   assert.match(frontend, /await armWakeListener\(\)/);
   assert.match(frontend, /VOICE_IDLE_SLEEP_MS/);
   assert.match(uiConfig, /"voiceIdleSleepMs": 300000/);
+});
+
+test("Voice degradation copy is configuration-driven", () => {
+  assert.match(frontend, /uiConfig\.messages\.voicePermissionTitle/);
+  assert.match(frontend, /uiConfig\.messages\.voicePermissionCopy/);
+  assert.match(frontend, /uiConfig\.messages\.voiceConnectionTitle/);
+  assert.match(uiConfig, /"voicePermissionCopy"/);
 });
 
 test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
@@ -216,10 +223,11 @@ test("idle text input uses the Codex task thread", () => {
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
   assert.match(frontend, /jarvis\.threadId:v4:/);
-  assert.match(backend, /HIGHEST PRIORITY FILE RULE/);
-  assert.match(backend, /paths under ~\/notes/);
-  assert.match(backend, /previous conversation preference to use Obsidian is superseded/);
-  assert.match(backend, /Do not route direct file edits through Obsidian/);
+  assert.match(promptsConfig, /HIGHEST PRIORITY FILE RULE/);
+  assert.match(promptsConfig, /paths under ~\/notes/);
+  assert.match(promptsConfig, /previous conversation preference to use Obsidian is superseded/);
+  assert.match(promptsConfig, /Do not route direct file edits through Obsidian/);
+  assert.match(backend, /config::prompt\("codexBaseInstructions"\)/);
 });
 
 test("pause control can resume Jarvis and swaps to a play icon", () => {
@@ -250,6 +258,7 @@ test("production configuration persists workspace and resumes threads", () => {
   assert.match(backend, /"thread\/resume"/);
   assert.match(backend, /validated_workspace/);
   assert.match(wakeHelper, /requiresOnDeviceRecognition = false/);
+  assert.match(wakeHelper, /contextualStrings = phrases/);
 });
 
 test("user can create a fresh Codex thread without deleting history", () => {

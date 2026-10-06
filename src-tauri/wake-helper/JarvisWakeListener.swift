@@ -99,6 +99,8 @@ final class WakeListener {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        request.taskHint = .search
+        request.contextualStrings = phrases
         // Follow Apple's normal Speech Recognition path, like Siri's speech
         // input. Requiring the local language pack can leave the listener in
         // a permanent ready state without producing any transcript on macOS.

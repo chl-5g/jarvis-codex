@@ -14,6 +14,7 @@ const MAX_OUTPUT: usize = 12_000;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_LIST_RESULTS: usize = 200;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
+const MAX_MEMORY_INPUT: usize = 12_000;
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Serialize)]
@@ -105,6 +106,36 @@ pub fn list() -> Vec<ToolSpec> {
         ToolSpec {
             name: "capture_camera",
             description: crate::config::tool_description("capture_camera"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_recall",
+            description: crate::config::tool_description("memory_recall"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_core",
+            description: crate::config::tool_description("memory_save_core"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_episode",
+            description: crate::config::tool_description("memory_save_episode"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_working_append",
+            description: crate::config::tool_description("memory_working_append"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_search_procedures",
+            description: crate::config::tool_description("memory_search_procedures"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_procedure",
+            description: crate::config::tool_description("memory_save_procedure"),
             requires_full_access: false,
         },
     ]
@@ -199,6 +230,46 @@ pub fn openai_schemas() -> Vec<Value> {
             json!({}),
             &[],
         ),
+        schema(
+            "memory_recall",
+            crate::config::tool_description("memory_recall"),
+            json!({"query": {"type": "string"}}),
+            &["query"],
+        ),
+        schema(
+            "memory_save_core",
+            crate::config::tool_description("memory_save_core"),
+            json!({
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+                "category": {"type": "string", "enum": ["user_profile", "project_fact", "preference", "reference"]}
+            }),
+            &["key", "value"],
+        ),
+        schema(
+            "memory_save_episode",
+            crate::config::tool_description("memory_save_episode"),
+            json!({"title": {"type": "string"}, "summary": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}),
+            &["summary"],
+        ),
+        schema(
+            "memory_working_append",
+            crate::config::tool_description("memory_working_append"),
+            json!({"role": {"type": "string"}, "content": {"type": "string"}}),
+            &["role", "content"],
+        ),
+        schema(
+            "memory_search_procedures",
+            crate::config::tool_description("memory_search_procedures"),
+            json!({"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}),
+            &["query"],
+        ),
+        schema(
+            "memory_save_procedure",
+            crate::config::tool_description("memory_save_procedure"),
+            json!({"name": {"type": "string"}, "description": {"type": "string"}, "trigger_pattern": {"type": "string"}, "steps": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100}}),
+            &["name", "description", "steps"],
+        ),
     ]
 }
 
@@ -254,6 +325,12 @@ pub async fn execute(
             Err(error) => Err(error),
         },
         "capture_camera" => crate::request_camera_capture(app.clone()).await,
+        "memory_recall" => memory_recall(&args),
+        "memory_save_core" => memory_save_core(&args),
+        "memory_save_episode" => memory_save_episode(&args),
+        "memory_working_append" => memory_working_append(&args),
+        "memory_search_procedures" => memory_search_procedures(&args),
+        "memory_save_procedure" => memory_save_procedure(&args),
         _ => Err(format!("未知工具：{tool_name}")),
     };
 
@@ -289,6 +366,85 @@ pub async fn execute(
         },
     );
     response
+}
+
+fn bounded_memory_arg(args: &Value, name: &str) -> Result<String, String> {
+    let value = string_arg(args, name)?;
+    if value.chars().count() > MAX_MEMORY_INPUT {
+        return Err(format!("{name} 不能超过 {MAX_MEMORY_INPUT} 个字符"));
+    }
+    Ok(value.to_owned())
+}
+
+fn memory_recall(args: &Value) -> Result<String, String> {
+    let query = bounded_memory_arg(args, "query")?;
+    Ok(crate::memory::MemoryStore::default().recall(&query, MAX_OUTPUT))
+}
+
+fn memory_save_core(args: &Value) -> Result<String, String> {
+    let key = bounded_memory_arg(args, "key")?;
+    let value = bounded_memory_arg(args, "value")?;
+    let category = args
+        .get("category")
+        .and_then(Value::as_str)
+        .unwrap_or("reference");
+    crate::memory::MemoryStore::default().save_core(&key, &value, category)
+}
+
+fn memory_save_episode(args: &Value) -> Result<String, String> {
+    let title = args.get("title").and_then(Value::as_str).unwrap_or("");
+    let summary = bounded_memory_arg(args, "summary")?;
+    let tags: Vec<String> = args
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    crate::memory::MemoryStore::default().save_episode(title, &summary, &tags)
+}
+
+fn memory_working_append(args: &Value) -> Result<String, String> {
+    let role = bounded_memory_arg(args, "role")?;
+    let content = bounded_memory_arg(args, "content")?;
+    crate::memory::MemoryStore::default().append_working(&role, &content)
+}
+
+fn memory_search_procedures(args: &Value) -> Result<String, String> {
+    let query = bounded_memory_arg(args, "query")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(8)
+        .clamp(1, 8) as usize;
+    serde_json::to_string(&crate::memory::MemoryStore::default().search_procedures(&query, limit))
+        .map_err(|error| format!("程序性记忆序列化失败：{error}"))
+}
+
+fn memory_save_procedure(args: &Value) -> Result<String, String> {
+    let name = bounded_memory_arg(args, "name")?;
+    let description = bounded_memory_arg(args, "description")?;
+    let trigger_pattern = args
+        .get("trigger_pattern")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let steps = args
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or("memory_save_procedure 需要 steps")?
+        .iter()
+        .map(|step| step.as_str().map(str::to_owned).ok_or("程序步骤必须是文本"))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::memory::MemoryStore::default().save_procedure(
+        &name,
+        &description,
+        trigger_pattern,
+        &steps,
+    )
 }
 
 fn read_file(root: &Path, args: &Value, full_access: bool) -> Result<String, String> {
@@ -767,6 +923,33 @@ mod tests {
         let output = truncate("x".repeat(MAX_OUTPUT + 100));
         assert!(output.chars().count() <= MAX_OUTPUT + 32);
         assert!(output.contains("output truncated"));
+    }
+
+    #[test]
+    fn memory_tools_are_exposed_to_model_gateway() {
+        let names = openai_schemas()
+            .into_iter()
+            .filter_map(|schema| {
+                schema
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        for name in [
+            "memory_recall",
+            "memory_save_core",
+            "memory_save_episode",
+            "memory_working_append",
+            "memory_search_procedures",
+            "memory_save_procedure",
+        ] {
+            assert!(
+                names.iter().any(|candidate| candidate == name),
+                "missing model tool: {name}"
+            );
+        }
     }
 
     #[test]

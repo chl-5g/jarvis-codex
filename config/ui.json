@@ -6,7 +6,10 @@
     "wakeMemoryLoaded": "唤醒前记忆已读取",
     "wakeMemoryFailed": "唤醒记忆读取失败",
     "voiceIdleSleep": "静默超时，Jarvis 已休眠；请再次说唤醒词",
-    "voiceIdleSleepFailed": "自动休眠失败"
+    "voiceIdleSleepFailed": "自动休眠失败",
+    "voicePermissionTitle": "JARVIS NEEDS PERMISSION",
+    "voiceConnectionTitle": "JARVIS CONNECTION ERROR",
+    "voicePermissionCopy": "首次使用请允许麦克风和语音识别。"
   },
   "timeouts": {
     "voiceIdleSleepMs": 300000
