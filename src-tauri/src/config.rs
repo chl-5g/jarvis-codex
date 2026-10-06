@@ -10,10 +10,15 @@ const PERMISSIONS_JSON: &str = include_str!(concat!(
     "/../config/permissions.json"
 ));
 const PATHS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/paths.json"));
+const CONNECTORS_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../config/connectors.json"
+));
 static CONFIG: OnceLock<Value> = OnceLock::new();
 static PERMISSIONS: OnceLock<Value> = OnceLock::new();
 static PATHS: OnceLock<Value> = OnceLock::new();
 static PROJECT_ROOT: OnceLock<String> = OnceLock::new();
+static CONNECTORS: OnceLock<Value> = OnceLock::new();
 
 fn value() -> &'static Value {
     CONFIG.get_or_init(|| {
@@ -56,6 +61,15 @@ pub fn log_directory() -> String {
         .and_then(Value::as_str)
         .unwrap_or("logs");
     format!("{root}/{directory}")
+}
+
+pub fn connectors() -> Value {
+    CONNECTORS
+        .get_or_init(|| {
+            serde_json::from_str(CONNECTORS_JSON)
+                .unwrap_or_else(|_| Value::Object(Default::default()))
+        })
+        .clone()
 }
 
 pub fn prompt(key: &str) -> &'static str {

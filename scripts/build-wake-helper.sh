@@ -34,3 +34,14 @@ cp "$location_dir/Info.plist" "$location_app/Contents/Info.plist"
 /usr/bin/codesign --force --options runtime \
   --entitlements "$location_dir/Entitlements.plist" \
   --sign "$signing_identity" "$location_app"
+
+camera_dir="$project_dir/src-tauri/camera-helper"
+camera_app="$camera_dir/JarvisCameraHelper.app"
+mkdir -p "$camera_app/Contents/MacOS"
+cp "$camera_dir/Info.plist" "$camera_app/Contents/Info.plist"
+/usr/bin/swiftc -O -framework AVFoundation \
+  "$camera_dir/JarvisCameraHelper.swift" \
+  -o "$camera_app/Contents/MacOS/JarvisCameraHelper"
+/usr/bin/codesign --force --options runtime \
+  --entitlements "$camera_dir/Entitlements.plist" \
+  --sign "$signing_identity" "$camera_app"

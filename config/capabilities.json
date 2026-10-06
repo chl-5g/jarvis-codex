@@ -3,7 +3,7 @@
   "speechRecognition": { "status": "implemented", "permission": "speechRecognition", "request": "on_wake_enable" },
   "location": { "status": "implemented", "permission": "location", "request": "on_location_tool" },
   "cameraApp": { "status": "partial", "permission": "camera", "request": "on_camera_tool" },
-  "cameraCapture": { "status": "planned", "permission": "camera", "request": "on_camera_capture" },
+  "cameraCapture": { "status": "implemented", "permission": "camera", "request": "on_camera_capture" },
   "screenRecording": { "status": "planned", "permission": "screenRecording", "request": "on_screen_tool" },
   "accessibility": { "status": "planned", "permission": "accessibility", "request": "on_desktop_control" },
   "fullDiskAccess": { "status": "planned", "permission": "fullDiskAccess", "request": "on_external_file_tool" },

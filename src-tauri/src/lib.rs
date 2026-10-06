@@ -53,6 +53,11 @@ fn skills_context(query: String, max_chars: Option<usize>) -> String {
     skills::SkillsRegistry::default().context(&query, max_chars.unwrap_or(4_000))
 }
 
+#[tauri::command]
+fn connector_list() -> Value {
+    config::connectors()
+}
+
 struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
@@ -599,6 +604,21 @@ fn location_helper_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("Jarvis 位置能力组件未找到".to_owned())
 }
 
+fn camera_helper_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let relative = PathBuf::from("camera-helper/JarvisCameraHelper.app");
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join(&relative);
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
+    let development = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
+    if development.exists() {
+        return Ok(development);
+    }
+    Err("Jarvis 摄像头能力组件未找到".to_owned())
+}
+
 pub(crate) async fn request_current_location(app: AppHandle) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -660,6 +680,73 @@ pub(crate) async fn request_current_location(app: AppHandle) -> Result<String, S
             if child.try_wait().ok().flatten().is_some() {
                 let _ = fs::remove_file(&event_file);
                 return Err("位置能力进程提前退出".to_owned());
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+    }
+}
+
+pub(crate) async fn request_camera_capture(app: AppHandle) -> Result<String, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        return Err("当前系统没有 Jarvis 原生摄像头能力".to_owned());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let helper = camera_helper_path(&app)?;
+        let event_file =
+            std::env::temp_dir().join(format!("jarvis-camera-{}.jsonl", std::process::id()));
+        let _ = fs::write(&event_file, "");
+        let mut child = Command::new("/usr/bin/open")
+            .args(["-n", "-W"])
+            .arg(&helper)
+            .args(["--args", "--event-file"])
+            .arg(&event_file)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("启动摄像头能力失败：{error}"))?;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+        loop {
+            let content = fs::read_to_string(&event_file).unwrap_or_default();
+            for line in content.lines() {
+                let Ok(value) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
+                match value.get("type").and_then(Value::as_str) {
+                    Some("photo") => {
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                        let _ = fs::remove_file(&event_file);
+                        return Ok(value.to_string());
+                    }
+                    Some("error") => {
+                        let message = value
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .unwrap_or("摄像头能力失败")
+                            .to_owned();
+                        let _ = child.kill().await;
+                        let _ = child.wait().await;
+                        let _ = fs::remove_file(&event_file);
+                        if message.contains("permission denied") {
+                            let _ = open_capability_settings("camera").await;
+                        }
+                        return Err(message);
+                    }
+                    _ => {}
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                let _ = fs::remove_file(&event_file);
+                return Err("摄像头能力超时".to_owned());
+            }
+            if child.try_wait().ok().flatten().is_some() {
+                let _ = fs::remove_file(&event_file);
+                return Err("摄像头能力进程提前退出".to_owned());
             }
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
@@ -1692,6 +1779,7 @@ pub fn run() {
             skills_list,
             skills_match,
             skills_context,
+            connector_list,
             knowledge_status,
             knowledge_scan,
             knowledge_search,

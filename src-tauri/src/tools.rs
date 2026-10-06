@@ -102,6 +102,11 @@ pub fn list() -> Vec<ToolSpec> {
             description: crate::config::tool_description("request_capability"),
             requires_full_access: false,
         },
+        ToolSpec {
+            name: "capture_camera",
+            description: crate::config::tool_description("capture_camera"),
+            requires_full_access: false,
+        },
     ]
 }
 
@@ -188,6 +193,12 @@ pub fn openai_schemas() -> Vec<Value> {
             json!({"capability": {"type": "string"}}),
             &["capability"],
         ),
+        schema(
+            "capture_camera",
+            crate::config::tool_description("capture_camera"),
+            json!({}),
+            &[],
+        ),
     ]
 }
 
@@ -242,6 +253,7 @@ pub async fn execute(
             Ok(capability) => crate::open_capability_settings(capability.trim()).await,
             Err(error) => Err(error),
         },
+        "capture_camera" => crate::request_camera_capture(app.clone()).await,
         _ => Err(format!("未知工具：{tool_name}")),
     };
 
