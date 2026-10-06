@@ -19,6 +19,34 @@ const DEFAULT_MODEL: &str = "/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit";
 const MAX_TOOL_ROUNDS: usize = 4;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
 
+fn prefers_reasoning(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    text.chars().count() > 80
+        || [
+            "分析",
+            "解释",
+            "比较",
+            "规划",
+            "设计",
+            "为什么",
+            "如何",
+            "代码",
+            "调试",
+            "推理",
+            "analyze",
+            "explain",
+            "compare",
+            "plan",
+            "design",
+            "why",
+            "how",
+            "code",
+            "debug",
+        ]
+        .iter()
+        .any(|word| lower.contains(word))
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct QwenEvent {
     pub delta: Option<String>,
@@ -80,8 +108,9 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
         json!({"role":"system", "content": system}),
         json!({"role":"user", "content": text}),
     ];
+    let reasoning = prefers_reasoning(text);
     for round in 0..=MAX_TOOL_ROUNDS {
-        let response = request_round(&app, &messages, schemas.clone()).await?;
+        let response = request_round(&app, &messages, schemas.clone(), reasoning).await?;
         if response.tool_calls.is_empty() {
             if response.content.trim().is_empty() {
                 return Err("本地 Qwen 没有返回最终答案".to_owned());
@@ -143,6 +172,7 @@ async fn request_round(
     app: &AppHandle,
     messages: &[Value],
     schemas: Vec<Value>,
+    reasoning: bool,
 ) -> Result<QwenRound, String> {
     let tools_enabled = !schemas.is_empty() && env_flag("JARVIS_QWEN_TOOLS", true);
     let mut body = json!({
@@ -151,7 +181,7 @@ async fn request_round(
         "stream": true,
         "max_tokens": 1024,
         "temperature": 0.4,
-        "chat_template_kwargs": {"enable_thinking": false, "reasoning_effort": "none", "preserve_thinking": false}
+        "chat_template_kwargs": {"enable_thinking": reasoning, "reasoning_effort": if reasoning { "medium" } else { "none" }, "preserve_thinking": false}
     });
     if tools_enabled {
         body["tools"] = Value::Array(schemas);
