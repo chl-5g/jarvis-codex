@@ -58,10 +58,10 @@ test("Voice uses Codex app-server V3 WebRTC directly", () => {
   assert.doesNotMatch(frontend, /OPENAI_API_KEY|ChatGPT.*button|hotkey/i);
 });
 
-test("Voice capability requests use the audited Codex task path", () => {
-  assert.match(frontend, /routeVoiceCapabilityTask/);
-  assert.match(frontend, /isSystemCapabilityRequest/);
-  assert.match(backend, /current_location/);
+test("Voice capability results are returned through native Codex tools", () => {
+  assert.match(backend, /item\/tool\/call/);
+  assert.match(backend, /dynamicTools/);
+  assert.doesNotMatch(frontend, /routeVoiceCapabilityTask/);
 });
 
 test("bundled Codex runtime inherits the macOS proxy for realtime connectivity", () => {
@@ -166,7 +166,7 @@ test("idle text input uses the Codex task thread", () => {
 });
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
-  assert.match(frontend, /jarvis\.threadId:v2:/);
+  assert.match(frontend, /jarvis\.threadId:v3:/);
   assert.match(backend, /HIGHEST PRIORITY FILE RULE/);
   assert.match(backend, /paths under ~\/notes/);
   assert.match(backend, /previous conversation preference to use Obsidian is superseded/);
