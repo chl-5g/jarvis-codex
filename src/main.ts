@@ -5,6 +5,7 @@ import "./style.css";
 import { parseCipherPipeCommand, shouldUseLocalQwen } from "./text-routing.mjs";
 import uiConfig from "$PROJECT_PATH/config/ui.json";
 import pathsConfig from "$PROJECT_PATH/config/paths.json";
+import voiceConfig from "$PROJECT_PATH/config/voice.json";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -71,7 +72,7 @@ const state = {
 const WORKSPACE_KEY = "jarvis.workspace";
 const PROJECT_ROOT = import.meta.env.VITE_PROJECTPATH || pathsConfig.projectRoot;
 const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
-const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEEP_MS ?? "", 10) || uiConfig.timeouts.voiceIdleSleepMs;
+const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEEP_MS ?? "", 10) || voiceConfig.timeouts.voiceIdleSleepMs;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.

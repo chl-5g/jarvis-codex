@@ -9,6 +9,8 @@ const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", impor
 const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
 const promptsConfig = await readFile(new URL("../config/prompts.json", import.meta.url), "utf8");
 const uiConfig = await readFile(new URL("../config/ui.json", import.meta.url), "utf8");
+const voiceConfig = await readFile(new URL("../config/voice.json", import.meta.url), "utf8");
+const toolsConfig = await readFile(new URL("../config/tools.json", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
@@ -69,7 +71,7 @@ test("Voice capability results are returned through native Codex tools", () => {
 });
 
 test("camera intent is described as autonomous visual inspection", () => {
-  assert.match(promptsConfig, /what is in front of them/);
+  assert.match(toolsConfig, /what is in front of them/);
   assert.match(backend, /inputImage/);
   assert.match(backend, /data:image\/jpeg;base64/);
 });
@@ -127,7 +129,12 @@ test("Voice sleeps after configured inactivity and waits for wake", () => {
   assert.match(frontend, /sleepVoiceAfterIdle\(\)/);
   assert.match(frontend, /await armWakeListener\(\)/);
   assert.match(frontend, /VOICE_IDLE_SLEEP_MS/);
-  assert.match(uiConfig, /"voiceIdleSleepMs": 300000/);
+  assert.match(voiceConfig, /"voiceIdleSleepMs": 300000/);
+});
+
+test("tool descriptions are kept outside prompt policy", () => {
+  assert.match(toolsConfig, /"descriptions"/);
+  assert.doesNotMatch(promptsConfig, /"toolDescriptions"/);
 });
 
 test("Voice degradation copy is configuration-driven", () => {

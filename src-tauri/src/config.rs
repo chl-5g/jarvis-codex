@@ -14,11 +14,13 @@ const CONNECTORS_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../config/connectors.json"
 ));
+const TOOLS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/tools.json"));
 static CONFIG: OnceLock<Value> = OnceLock::new();
 static PERMISSIONS: OnceLock<Value> = OnceLock::new();
 static PATHS: OnceLock<Value> = OnceLock::new();
 static PROJECT_ROOT: OnceLock<String> = OnceLock::new();
 static CONNECTORS: OnceLock<Value> = OnceLock::new();
+static TOOLS: OnceLock<Value> = OnceLock::new();
 
 fn value() -> &'static Value {
     CONFIG.get_or_init(|| {
@@ -72,13 +74,19 @@ pub fn connectors() -> Value {
         .clone()
 }
 
+fn tools() -> &'static Value {
+    TOOLS.get_or_init(|| {
+        serde_json::from_str(TOOLS_JSON).unwrap_or_else(|_| Value::Object(Default::default()))
+    })
+}
+
 pub fn prompt(key: &str) -> &'static str {
     value().get(key).and_then(Value::as_str).unwrap_or("")
 }
 
 pub fn tool_description(name: &str) -> &'static str {
-    value()
-        .get("toolDescriptions")
+    tools()
+        .get("descriptions")
         .and_then(|items| items.get(name))
         .and_then(Value::as_str)
         .unwrap_or("")
