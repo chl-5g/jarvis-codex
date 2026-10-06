@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./style.css";
 import { parseCipherPipeCommand, shouldUseLocalQwen } from "./text-routing.mjs";
+import uiConfig from "/Users/caihaolun/Jarvis-codex/config/ui.json";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -322,12 +323,7 @@ shell.addEventListener("focusin", (event) => {
 shell.addEventListener("focusout", scheduleControlsHide);
 
 let approvalId: number | string | undefined;
-const copy: Record<Mode, [string, string]> = {
-  booting: ["INITIALIZING", "SYSTEM BOOT"], ready: ["READY", "CODEX VOICE STANDBY"],
-  "voice-starting": ["VOICE LINKING", "OPENING CODEX VOICE"], listening: ["LISTENING", "OFFICIAL VOICE ONLINE"],
-  working: ["WORKING", "TASK EXECUTION"], speaking: ["JARVIS SPEAKING", "VOICE OUTPUT"],
-  degraded: ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"], stopped: ["PAUSED", "JARVIS PAUSED"],
-};
+const copy = uiConfig.status as Record<Mode, [string, string]>;
 
 function setMode(mode: Mode) {
   state.mode = mode; shell.setAttribute("data-mode", mode);
