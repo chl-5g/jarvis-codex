@@ -325,7 +325,7 @@ let approvalId: number | string | undefined;
 const copy: Record<Mode, [string, string]> = {
   booting: ["INITIALIZING", "SYSTEM BOOT"], ready: ["READY", "CODEX VOICE STANDBY"],
   "voice-starting": ["VOICE LINKING", "OPENING CODEX VOICE"], listening: ["LISTENING", "OFFICIAL VOICE ONLINE"],
-  working: ["CODEX WORKING", "TASK EXECUTION"], speaking: ["JARVIS SPEAKING", "VOICE OUTPUT"],
+  working: ["WORKING", "TASK EXECUTION"], speaking: ["JARVIS SPEAKING", "VOICE OUTPUT"],
   degraded: ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"], stopped: ["PAUSED", "JARVIS PAUSED"],
 };
 
@@ -785,7 +785,7 @@ async function handle(message: Message) {
     lastCompletedAgentText = "";
     state.agentWorking = true;
     appendStreamLine("开始处理任务", "task");
-    setMode("working"); setWorker("orchestrator", "Codex working");
+    setMode("working"); setWorker("orchestrator", "Working");
   } else if (method === "item/agentMessage/delta") {
     const delta = typeof params?.delta === "string" ? params.delta : "";
     agentMessageBuffer += delta;
@@ -1519,7 +1519,7 @@ if (currentWindow) {
   if (["acknowledge", "approval", "complete", "error"].includes(previewActionValue ?? "")) {
     window.setTimeout(() => triggerCharacterAction(previewActionValue as CharacterAction, 1800), 180);
   }
-  setWorker("orchestrator", visualPreviewMode === "working" ? "Codex working" : "Visual preview");
+  setWorker("orchestrator", visualPreviewMode === "working" ? "Working" : "Visual preview");
   if (visualPreviewMode === "working") {
     setWorker("developer", "Working");
   }
