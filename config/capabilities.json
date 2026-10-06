@@ -1,0 +1,21 @@
+{
+  "microphone": { "status": "implemented", "permission": "microphone", "request": "on_voice_start" },
+  "speechRecognition": { "status": "implemented", "permission": "speechRecognition", "request": "on_wake_enable" },
+  "location": { "status": "implemented", "permission": "location", "request": "on_location_tool" },
+  "cameraApp": { "status": "partial", "permission": "camera", "request": "on_camera_tool" },
+  "cameraCapture": { "status": "implemented", "permission": "camera", "request": "on_camera_capture" },
+  "screenRecording": { "status": "planned", "permission": "screenRecording", "request": "on_screen_tool" },
+  "accessibility": { "status": "planned", "permission": "accessibility", "request": "on_desktop_control" },
+  "fullDiskAccess": { "status": "planned", "permission": "fullDiskAccess", "request": "on_external_file_tool" },
+  "contacts": { "status": "planned", "permission": "contacts", "request": "on_contacts_tool" },
+  "calendar": { "status": "planned", "permission": "calendar", "request": "on_calendar_tool" },
+  "reminders": { "status": "planned", "permission": "reminders", "request": "on_reminders_tool" },
+  "photos": { "status": "planned", "permission": "photos", "request": "on_photos_tool" },
+  "bluetooth": { "status": "planned", "permission": "bluetooth", "request": "on_bluetooth_tool" },
+  "localNetwork": { "status": "planned", "permission": "localNetwork", "request": "on_lan_tool" },
+  "notifications": { "status": "planned", "permission": "notifications", "request": "on_notification_tool" },
+  "automation": { "status": "planned", "permission": "automation", "request": "on_automation_tool" },
+  "keychain": { "status": "planned", "permission": "keychain", "request": "on_keychain_tool" },
+  "browser": { "status": "planned", "permission": "network", "request": "on_browser_tool" },
+  "agentCommunication": { "status": "partial", "permission": "network", "request": "on_agent_message" }
+}

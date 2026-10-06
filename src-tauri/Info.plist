@@ -4,9 +4,17 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Jarvis does not capture video; this declaration allows WebKit to initialize its WebRTC media permission path.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Jarvis accesses files on the Desktop only when a task requires a file the user named.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Jarvis accesses files in Documents only when a task requires a file the user named.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Jarvis accesses files in Downloads only when a task requires a file the user named.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jarvis locally listens for the wake phrase “Hi Jarvis”; official Codex Voice handles the conversation.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>Jarvis locally recognizes its wake phrase before opening official Codex Voice.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Jarvis requests location only when a capability needs the current area.</string>
 </dict>
 </plist>

@@ -1,0 +1,35 @@
+{
+  "os": {
+    "kind": "capability",
+    "registry": "capabilities.json",
+    "auth": "macos-tcc",
+    "auditStream": "jarvis-events.jsonl"
+  },
+  "cipherpipe": {
+    "kind": "agent-messaging",
+    "enabledByDefault": false,
+    "auth": "pairing-token",
+    "auditStream": "conversation.jsonl"
+  },
+  "booking": {
+    "kind": "platform-api",
+    "enabledByDefault": false,
+    "auth": "user-oauth-or-api-key",
+    "requiresConfirmation": true,
+    "auditStream": "jarvis-events.jsonl"
+  },
+  "rideHailing": {
+    "kind": "platform-api",
+    "enabledByDefault": false,
+    "auth": "user-oauth-or-api-key",
+    "requiresConfirmation": true,
+    "auditStream": "jarvis-events.jsonl"
+  },
+  "calendar": {
+    "kind": "platform-api",
+    "enabledByDefault": false,
+    "auth": "user-oauth-or-os-permission",
+    "requiresConfirmation": false,
+    "auditStream": "jarvis-events.jsonl"
+  }
+}

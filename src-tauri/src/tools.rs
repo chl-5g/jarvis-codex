@@ -14,6 +14,7 @@ const MAX_OUTPUT: usize = 12_000;
 const MAX_SEARCH_RESULTS: usize = 40;
 const MAX_LIST_RESULTS: usize = 200;
 const DEFAULT_TIMEOUT_SECONDS: u64 = 60;
+const MAX_MEMORY_INPUT: usize = 12_000;
 static NEXT_CALL_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Serialize)]
@@ -49,38 +50,92 @@ pub fn list() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: "read_file",
-            description: "Read a UTF-8 text file within the active workspace.",
+            description: crate::config::tool_description("read_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "write_file",
-            description: "Create or replace a UTF-8 text file within the active workspace.",
+            description: crate::config::tool_description("write_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "append_file",
-            description: "Append UTF-8 text to a file within the active workspace.",
+            description: crate::config::tool_description("append_file"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "list_files",
-            description: "List files below a workspace directory.",
+            description: crate::config::tool_description("list_files"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "search_files",
-            description: "Search text files below a workspace directory.",
+            description: crate::config::tool_description("search_files"),
             requires_full_access: false,
         },
         ToolSpec {
             name: "run_command",
-            description:
-                "Run a read-only command from the active workspace using the local whitelist.",
+            description: crate::config::tool_description("run_command"),
             requires_full_access: true,
         },
         ToolSpec {
             name: "current_time",
-            description: "Return the current UTC time.",
+            description: crate::config::tool_description("current_time"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "current_location",
+            description: crate::config::tool_description("current_location"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "current_weather",
+            description: crate::config::tool_description("current_weather"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "open_camera",
+            description: crate::config::tool_description("open_camera"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "request_capability",
+            description: crate::config::tool_description("request_capability"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "capture_camera",
+            description: crate::config::tool_description("capture_camera"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_recall",
+            description: crate::config::tool_description("memory_recall"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_core",
+            description: crate::config::tool_description("memory_save_core"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_episode",
+            description: crate::config::tool_description("memory_save_episode"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_working_append",
+            description: crate::config::tool_description("memory_working_append"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_search_procedures",
+            description: crate::config::tool_description("memory_search_procedures"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "memory_save_procedure",
+            description: crate::config::tool_description("memory_save_procedure"),
             requires_full_access: false,
         },
     ]
@@ -93,7 +148,7 @@ pub fn openai_schemas() -> Vec<Value> {
     vec![
         schema(
             "read_file",
-            "Read a UTF-8 text file within the active workspace.",
+            crate::config::tool_description("read_file"),
             json!({
                 "path": {"type": "string", "description": "Workspace-relative or explicitly permitted path"}
             }),
@@ -101,7 +156,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "write_file",
-            "Create or replace a UTF-8 text file within the active workspace.",
+            crate::config::tool_description("write_file"),
             json!({
                 "path": {"type": "string"}, "content": {"type": "string"}
             }),
@@ -109,7 +164,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "append_file",
-            "Append UTF-8 text to a file within the active workspace.",
+            crate::config::tool_description("append_file"),
             json!({
                 "path": {"type": "string"}, "content": {"type": "string"}
             }),
@@ -117,7 +172,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "list_files",
-            "List files below a workspace directory.",
+            crate::config::tool_description("list_files"),
             json!({
                 "path": {"type": "string", "description": "Directory, default ."}
             }),
@@ -125,7 +180,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "search_files",
-            "Search text files below a workspace directory.",
+            crate::config::tool_description("search_files"),
             json!({
                 "query": {"type": "string"}, "path": {"type": "string", "description": "Directory, default ."}
             }),
@@ -133,7 +188,7 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "run_command",
-            "Run a non-destructive shell command from the active workspace with a timeout.",
+            crate::config::tool_description("run_command"),
             json!({
                 "command": {"type": "string"}, "timeout": {"type": "integer", "minimum": 1, "maximum": DEFAULT_TIMEOUT_SECONDS}
             }),
@@ -141,9 +196,79 @@ pub fn openai_schemas() -> Vec<Value> {
         ),
         schema(
             "current_time",
-            "Return the current UTC time.",
+            crate::config::tool_description("current_time"),
             json!({}),
             &[],
+        ),
+        schema(
+            "current_location",
+            crate::config::tool_description("current_location"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "current_weather",
+            crate::config::tool_description("current_weather"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "open_camera",
+            crate::config::tool_description("open_camera"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "request_capability",
+            crate::config::tool_description("request_capability"),
+            json!({"capability": {"type": "string"}}),
+            &["capability"],
+        ),
+        schema(
+            "capture_camera",
+            crate::config::tool_description("capture_camera"),
+            json!({}),
+            &[],
+        ),
+        schema(
+            "memory_recall",
+            crate::config::tool_description("memory_recall"),
+            json!({"query": {"type": "string"}}),
+            &["query"],
+        ),
+        schema(
+            "memory_save_core",
+            crate::config::tool_description("memory_save_core"),
+            json!({
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+                "category": {"type": "string", "enum": ["user_profile", "project_fact", "preference", "reference"]}
+            }),
+            &["key", "value"],
+        ),
+        schema(
+            "memory_save_episode",
+            crate::config::tool_description("memory_save_episode"),
+            json!({"title": {"type": "string"}, "summary": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}),
+            &["summary"],
+        ),
+        schema(
+            "memory_working_append",
+            crate::config::tool_description("memory_working_append"),
+            json!({"role": {"type": "string"}, "content": {"type": "string"}}),
+            &["role", "content"],
+        ),
+        schema(
+            "memory_search_procedures",
+            crate::config::tool_description("memory_search_procedures"),
+            json!({"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}}),
+            &["query"],
+        ),
+        schema(
+            "memory_save_procedure",
+            crate::config::tool_description("memory_save_procedure"),
+            json!({"name": {"type": "string"}, "description": {"type": "string"}, "trigger_pattern": {"type": "string"}, "steps": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 100}}),
+            &["name", "description", "steps"],
         ),
     ]
 }
@@ -192,6 +317,20 @@ pub async fn execute(
         "search_files" => search_files(workspace, &args, full_access),
         "run_command" => run_command(workspace, &args, full_access).await,
         "current_time" => Ok(chrono_like_now()),
+        "current_location" => crate::request_current_location(app.clone()).await,
+        "current_weather" => network_weather(app.clone()).await,
+        "open_camera" => open_camera().await,
+        "request_capability" => match string_arg(&args, "capability") {
+            Ok(capability) => crate::open_capability_settings(capability.trim()).await,
+            Err(error) => Err(error),
+        },
+        "capture_camera" => crate::request_camera_capture(app.clone()).await,
+        "memory_recall" => memory_recall(&args),
+        "memory_save_core" => memory_save_core(&args),
+        "memory_save_episode" => memory_save_episode(&args),
+        "memory_working_append" => memory_working_append(&args),
+        "memory_search_procedures" => memory_search_procedures(&args),
+        "memory_save_procedure" => memory_save_procedure(&args),
         _ => Err(format!("未知工具：{tool_name}")),
     };
 
@@ -227,6 +366,85 @@ pub async fn execute(
         },
     );
     response
+}
+
+fn bounded_memory_arg(args: &Value, name: &str) -> Result<String, String> {
+    let value = string_arg(args, name)?;
+    if value.chars().count() > MAX_MEMORY_INPUT {
+        return Err(format!("{name} 不能超过 {MAX_MEMORY_INPUT} 个字符"));
+    }
+    Ok(value.to_owned())
+}
+
+fn memory_recall(args: &Value) -> Result<String, String> {
+    let query = bounded_memory_arg(args, "query")?;
+    Ok(crate::memory::MemoryStore::default().recall(&query, MAX_OUTPUT))
+}
+
+fn memory_save_core(args: &Value) -> Result<String, String> {
+    let key = bounded_memory_arg(args, "key")?;
+    let value = bounded_memory_arg(args, "value")?;
+    let category = args
+        .get("category")
+        .and_then(Value::as_str)
+        .unwrap_or("reference");
+    crate::memory::MemoryStore::default().save_core(&key, &value, category)
+}
+
+fn memory_save_episode(args: &Value) -> Result<String, String> {
+    let title = args.get("title").and_then(Value::as_str).unwrap_or("");
+    let summary = bounded_memory_arg(args, "summary")?;
+    let tags: Vec<String> = args
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    crate::memory::MemoryStore::default().save_episode(title, &summary, &tags)
+}
+
+fn memory_working_append(args: &Value) -> Result<String, String> {
+    let role = bounded_memory_arg(args, "role")?;
+    let content = bounded_memory_arg(args, "content")?;
+    crate::memory::MemoryStore::default().append_working(&role, &content)
+}
+
+fn memory_search_procedures(args: &Value) -> Result<String, String> {
+    let query = bounded_memory_arg(args, "query")?;
+    let limit = args
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(8)
+        .clamp(1, 8) as usize;
+    serde_json::to_string(&crate::memory::MemoryStore::default().search_procedures(&query, limit))
+        .map_err(|error| format!("程序性记忆序列化失败：{error}"))
+}
+
+fn memory_save_procedure(args: &Value) -> Result<String, String> {
+    let name = bounded_memory_arg(args, "name")?;
+    let description = bounded_memory_arg(args, "description")?;
+    let trigger_pattern = args
+        .get("trigger_pattern")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let steps = args
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or("memory_save_procedure 需要 steps")?
+        .iter()
+        .map(|step| step.as_str().map(str::to_owned).ok_or("程序步骤必须是文本"))
+        .collect::<Result<Vec<_>, _>>()?;
+    crate::memory::MemoryStore::default().save_procedure(
+        &name,
+        &description,
+        trigger_pattern,
+        &steps,
+    )
 }
 
 fn read_file(root: &Path, args: &Value, full_access: bool) -> Result<String, String> {
@@ -346,6 +564,107 @@ async fn run_command(root: &Path, args: &Value, full_access: bool) -> Result<Str
     }
     let status = output.status.code().unwrap_or(-1);
     Ok(format!("Exit code: {status}\n{}", truncate(text)))
+}
+
+async fn network_location() -> Result<String, String> {
+    let output = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "8",
+            "https://ipapi.co/json/",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|error| format!("位置服务启动失败：{error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "位置服务不可用：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("位置服务返回无效数据：{error}"))?;
+    let city = value.get("city").and_then(Value::as_str).unwrap_or("");
+    let region = value.get("region").and_then(Value::as_str).unwrap_or("");
+    let country = value
+        .get("country_name")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if city.is_empty() && region.is_empty() {
+        return Err("位置服务没有返回城市".to_owned());
+    }
+    Ok(
+        json!({"city": city, "region": region, "country": country, "source": "network"})
+            .to_string(),
+    )
+}
+
+async fn network_weather(app: AppHandle) -> Result<String, String> {
+    let location = match crate::request_current_location(app).await {
+        Ok(location) => location,
+        Err(_) => network_location().await?,
+    };
+    let value: Value =
+        serde_json::from_str(&location).map_err(|error| format!("位置数据解析失败：{error}"))?;
+    let city = value
+        .get("city")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+        .ok_or("无法确定当前城市")?;
+    let encoded = city.replace(' ', "%20");
+    let url = format!("https://wttr.in/{encoded}?format=j1");
+    let output = Command::new("/usr/bin/curl")
+        .args([
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--max-time",
+            "12",
+            &url,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|error| format!("天气服务启动失败：{error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "天气服务不可用：{}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let weather: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("天气服务返回无效数据：{error}"))?;
+    Ok(json!({"location": value, "weather": weather, "source": "wttr.in"}).to_string())
+}
+
+async fn open_camera() -> Result<String, String> {
+    let status = Command::new("/usr/bin/open")
+        .args(["-a", "Photo Booth"])
+        .status()
+        .await;
+    let status = match status {
+        Ok(status) if status.success() => {
+            return Ok(crate::config::prompt("cameraOpenSuccess").to_owned())
+        }
+        Ok(status) => status,
+        Err(error) => {
+            return Err(format!(
+                "{}：{error}",
+                crate::config::prompt("cameraOpenFailure")
+            ))
+        }
+    };
+    if !status.success() {
+        let _ = crate::open_capability_settings("camera").await;
+        return Err(crate::config::prompt("cameraOpenFailure").to_owned());
+    }
+    Err(crate::config::prompt("cameraOpenFailure").to_owned())
 }
 
 fn resolve_path(root: &Path, raw: &str, full_access: bool) -> Result<PathBuf, String> {
@@ -604,6 +923,33 @@ mod tests {
         let output = truncate("x".repeat(MAX_OUTPUT + 100));
         assert!(output.chars().count() <= MAX_OUTPUT + 32);
         assert!(output.contains("output truncated"));
+    }
+
+    #[test]
+    fn memory_tools_are_exposed_to_model_gateway() {
+        let names = openai_schemas()
+            .into_iter()
+            .filter_map(|schema| {
+                schema
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect::<Vec<_>>();
+        for name in [
+            "memory_recall",
+            "memory_save_core",
+            "memory_save_episode",
+            "memory_working_append",
+            "memory_search_procedures",
+            "memory_save_procedure",
+        ] {
+            assert!(
+                names.iter().any(|candidate| candidate == name),
+                "missing model tool: {name}"
+            );
+        }
     }
 
     #[test]

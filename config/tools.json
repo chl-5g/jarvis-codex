@@ -1,0 +1,22 @@
+{
+  "descriptions": {
+    "read_file": "Read a UTF-8 text file within the active workspace.",
+    "write_file": "Create or replace a UTF-8 text file within the active workspace.",
+    "append_file": "Append UTF-8 text to a file within the active workspace.",
+    "list_files": "List files below a workspace directory.",
+    "search_files": "Search text files below a workspace directory.",
+    "run_command": "Run a read-only command from the active workspace using the local whitelist.",
+    "current_time": "Return the current UTC time.",
+    "current_location": "Resolve the user's current area through the operating-system location capability.",
+    "current_weather": "Get current weather after resolving the user's current area.",
+    "open_camera": "Open the system camera application when the user explicitly asks to use the camera.",
+    "capture_camera": "Capture one image for visual understanding. Use this automatically when the user asks what is in front of them, what they are looking at, what the camera sees, or asks to identify an object or scene; do not require the user to say 'open the camera'.",
+    "request_capability": "Open the macOS privacy settings page for a capability that needs user authorization.",
+    "memory_recall": "Search the user's private Jarvis memory for relevant facts, preferences, project context, or procedures.",
+    "memory_save_core": "Create or replace one bounded durable fact, preference, project fact, or reference in the user's private memory. Use only when the user explicitly asks to remember or update it.",
+    "memory_save_episode": "Save a bounded summary of a completed conversation or event in the user's private memory.",
+    "memory_working_append": "Append a bounded note to the current working memory. Use for an explicit user instruction to retain short-term context.",
+    "memory_search_procedures": "Search the user's saved reusable procedures and workflows.",
+    "memory_save_procedure": "Create or replace a reusable procedure in the user's private memory when the user explicitly asks Jarvis to remember a workflow."
+  }
+}

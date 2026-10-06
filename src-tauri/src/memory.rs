@@ -415,7 +415,9 @@ impl MemoryStore {
                 .collect();
             out.push_str(&format!("\n### {}\n{}\n", file.path.display(), excerpt));
         }
-        out.truncate(max_chars);
+        if out.chars().count() > max_chars {
+            out = out.chars().take(max_chars).collect();
+        }
         out
     }
 
@@ -782,6 +784,19 @@ mod tests {
         let store = MemoryStore::from_root(temp_root("missing"));
         assert!(store.recall("anything", 2_000).is_empty());
         assert!(store.initial_context(2_000).is_empty());
+    }
+
+    #[test]
+    fn context_limit_preserves_utf8_boundaries() {
+        let store = MemoryStore::from_root(temp_root("utf8-boundary"));
+        let files = vec![MemoryFile {
+            path: PathBuf::from("你好.md"),
+            content: "你好世界".repeat(100),
+            score: 0,
+        }];
+        let context = store.format_context("recall", &files, 101);
+        assert!(context.chars().count() <= 101);
+        assert!(context.is_char_boundary(context.len()));
     }
 
     #[test]

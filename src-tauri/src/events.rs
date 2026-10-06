@@ -40,6 +40,7 @@ pub fn emit(app: &AppHandle, source: &str, payload: Value) {
         fields,
     };
     let value = serde_json::to_value(&envelope).unwrap_or(Value::Null);
+    crate::logging::append("jarvis-events", &value);
     let _ = app.emit("jarvis-event", &value);
     crate::bridge::publish(source.to_owned(), value);
 }

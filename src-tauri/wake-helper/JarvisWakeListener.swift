@@ -12,16 +12,16 @@ final class WakeListener {
     private let eventFile: URL?
     private let hostApp: URL?
 
-    private let phrases = [
-        "嗨jarvis",
-        "嘿jarvis",
-        "hijarvis",
-        "heyjarvis",
-        "嗨贾维斯",
-        "嘿贾维斯",
-    ]
+    private let phrases: [String]
 
     init() {
+        if let url = Bundle.main.url(forResource: "wake", withExtension: "json"),
+           let data = try? Data(contentsOf: url),
+           let config = try? JSONDecoder().decode(WakeConfig.self, from: data) {
+            phrases = config.phrases
+        } else {
+            phrases = []
+        }
         if
             let index = CommandLine.arguments.firstIndex(of: "--event-file"),
             CommandLine.arguments.indices.contains(index + 1)
@@ -62,6 +62,9 @@ final class WakeListener {
             "type": "authorization",
             "status": authorizationName(currentAuthorization),
         ])
+        if CommandLine.arguments.contains("--status-only") {
+            exit(0)
+        }
         if currentAuthorization == .authorized {
             startRecognition()
             RunLoop.main.run()
@@ -96,11 +99,12 @@ final class WakeListener {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        guard recognizer?.supportsOnDeviceRecognition == true else {
-            emit(["type": "error", "message": "on-device speech recognition unavailable"])
-            exit(7)
-        }
-        request.requiresOnDeviceRecognition = true
+        request.taskHint = .search
+        request.contextualStrings = phrases
+        // Follow Apple's normal Speech Recognition path, like Siri's speech
+        // input. Requiring the local language pack can leave the listener in
+        // a permanent ready state without producing any transcript on macOS.
+        request.requiresOnDeviceRecognition = false
         if #available(macOS 13.0, *) {
             request.addsPunctuation = false
         }
@@ -214,6 +218,10 @@ final class WakeListener {
             fflush(stdout)
         }
     }
+}
+
+private struct WakeConfig: Decodable {
+    let phrases: [String]
 }
 
 let listener = WakeListener()

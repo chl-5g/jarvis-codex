@@ -1,0 +1,48 @@
+{
+  "actions": {
+    "requestAllCapabilities": "请求全部系统权限"
+  },
+  "messages": {
+    "wakeMemoryLoaded": "唤醒前记忆已读取",
+    "wakeMemoryFailed": "唤醒记忆读取失败",
+    "voiceIdleSleep": "静默超时，Jarvis 已休眠；请再次说唤醒词",
+    "voiceIdleSleepFailed": "自动休眠失败",
+    "voicePermissionTitle": "JARVIS NEEDS PERMISSION",
+    "voiceConnectionTitle": "JARVIS CONNECTION ERROR",
+    "voicePermissionCopy": "首次使用请允许麦克风和语音识别。"
+  },
+  "status": {
+    "booting": [
+      "INITIALIZING",
+      "SYSTEM BOOT"
+    ],
+    "ready": [
+      "READY",
+      "CODEX VOICE STANDBY"
+    ],
+    "voice-starting": [
+      "VOICE LINKING",
+      "OPENING CODEX VOICE"
+    ],
+    "listening": [
+      "LISTENING",
+      "OFFICIAL VOICE ONLINE"
+    ],
+    "working": [
+      "WORKING",
+      "TASK EXECUTION"
+    ],
+    "speaking": [
+      "JARVIS SPEAKING",
+      "VOICE OUTPUT"
+    ],
+    "degraded": [
+      "PERMISSION NEEDED",
+      "WAKE SYSTEM OFFLINE"
+    ],
+    "stopped": [
+      "PAUSED",
+      "JARVIS PAUSED"
+    ]
+  }
+}

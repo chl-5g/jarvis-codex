@@ -31,7 +31,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,11 +44,17 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Wake Jarvis and work through Codex",
-    "resources": [
-      "wake-helper/JarvisWakeListener.app/",
-      "codex",
-      "local_tts.py"
-    ],
+    "resources": {
+      "wake-helper/JarvisWakeListener.app/": "wake-helper/JarvisWakeListener.app/",
+      "wake-helper/JarvisWakeListener.app/Contents/Resources/wake.json": "wake-helper/JarvisWakeListener.app/Contents/Resources/wake.json",
+      "location-helper/JarvisLocationHelper.app/": "location-helper/JarvisLocationHelper.app/",
+      "camera-helper/JarvisCameraHelper.app/": "camera-helper/JarvisCameraHelper.app/",
+      "codex": "codex",
+      "local_tts.py": "local_tts.py",
+      "speech_worker.py": "speech_worker.py",
+      "../controller.py": "controller.py",
+      "cipherpipe_bridge.py": "cipherpipe_bridge.py"
+    },
     "macOS": {
       "minimumSystemVersion": "13.0",
       "signingIdentity": "-",

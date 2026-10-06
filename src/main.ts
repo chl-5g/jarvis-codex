@@ -2,6 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./style.css";
+import { parseCipherPipeCommand, shouldUseLocalQwen } from "./text-routing.mjs";
+import uiConfig from "$PROJECT_PATH/config/ui.json";
+import pathsConfig from "$PROJECT_PATH/config/paths.json";
+import voiceConfig from "$PROJECT_PATH/config/voice.json";
 
 type Mode = "booting" | "ready" | "voice-starting" | "listening" | "working" | "speaking" | "degraded" | "stopped";
 type Message = { id?: number | string; method?: string; params?: any };
@@ -31,6 +35,7 @@ type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
 type ModelMode = "hybrid" | "qwen" | "codex";
 type QwenEvent = { delta?: string; done?: boolean; error?: string };
+type WakeMemoryStatus = { initialContextChars: number; workingContextChars: number };
 type BridgeStatus = { enabled: boolean; bindAddress: string; port?: number; paired: boolean; endpoint?: string };
 type BridgeEnableResult = { status: BridgeStatus; pairingToken?: string };
 type JarvisEvent = {
@@ -65,11 +70,13 @@ const state = {
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
-const PROJECT_WORKSPACE = "/Users/caihaolun/Jarvis-codex/agent-workspace";
+const PROJECT_ROOT = import.meta.env.VITE_PROJECTPATH || pathsConfig.projectRoot;
+const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
+const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEEP_MS ?? "", 10) || voiceConfig.timeouts.voiceIdleSleepMs;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
-const THREAD_KEY_PREFIX = "jarvis.threadId:v2:";
+const THREAD_KEY_PREFIX = "jarvis.threadId:v4:";
 // Use a new key so an older session that was left in safe mode does not make
 // the single-user deployment ask for approval on every task.
 const PERMISSION_KEY = "jarvis.permissionMode:v2";
@@ -80,8 +87,8 @@ const permissionLabels: Record<PermissionMode, string> = {
   full: "完全访问 · 高风险",
 };
 const modelModeLabels: Record<ModelMode, string> = {
-  hybrid: "混合模式 · Voice 优先，本地 Qwen 兜底",
-  qwen: "本地 Qwen · 8080",
+  hybrid: "在线优先 · Codex，失败时端侧降级",
+  qwen: "端侧模型 · 8080",
   codex: "Codex 原生 · 工作线程",
 };
 function storedPermissionMode(): PermissionMode {
@@ -116,6 +123,8 @@ let lastUserTurnText = "";
 let qwenAnswerBuffer = "";
 let voiceStartInFlight = false;
 let recoverableColdStartError = false;
+let voiceIdleSleepTimer: number | null = null;
+let voiceIdleSleepInFlight = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -198,9 +207,9 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
     <form id="command-form" class="command"><input id="command-input" aria-label="文字指令" placeholder="Voice 不可用时，发送本地 Codex 文字任务…" autocomplete="off"><button>SEND</button></form>
     <button id="stop" class="control stop" aria-label="暂停 Jarvis"><span id="stop-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect class="stop-mark" x="6.5" y="6.5" width="11" height="11" rx="1.8"></rect></svg></span><b id="stop-label">PAUSE</b><small id="stop-hint">PAUSE ALL</small></button>
   </footer>
-  <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
+  <div id="degraded-banner" class="degraded-banner" hidden><b id="degraded-title">${uiConfig.messages.voicePermissionTitle}</b><span id="degraded-copy">${uiConfig.messages.voicePermissionCopy}</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>混合模式</b><small>Voice 在线时用 Codex，文字任务优先本地 Qwen</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>本地 Qwen</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>模型路由修改立即保存；混合模式在语音关闭时自动使用本地 Qwen。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><button id="request-all-permissions" type="button">${uiConfig.actions.requestAllCapabilities}</button><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>在线优先</b><small>所有任务先走原生 Codex，离线或失败时端侧降级</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>端侧模型</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>在线优先模式先使用官方 Codex；只有 Codex 不可用时才使用端侧模型。端侧模型可手动强制启用。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -210,6 +219,7 @@ const response = $("#assistant-transcript");
 const eventStream = $("#event-stream");
 const streamState = $("#stream-state");
 const banner = $("#degraded-banner") as HTMLDivElement;
+const degradedTitle = $("#degraded-title");
 const mic = $("#mic") as HTMLButtonElement;
 const approval = $("#approval") as HTMLDialogElement;
 const settings = $("#settings-dialog") as HTMLDialogElement;
@@ -321,12 +331,7 @@ shell.addEventListener("focusin", (event) => {
 shell.addEventListener("focusout", scheduleControlsHide);
 
 let approvalId: number | string | undefined;
-const copy: Record<Mode, [string, string]> = {
-  booting: ["INITIALIZING", "SYSTEM BOOT"], ready: ["READY", "CODEX VOICE STANDBY"],
-  "voice-starting": ["VOICE LINKING", "OPENING CODEX VOICE"], listening: ["LISTENING", "OFFICIAL VOICE ONLINE"],
-  working: ["CODEX WORKING", "TASK EXECUTION"], speaking: ["JARVIS SPEAKING", "VOICE OUTPUT"],
-  degraded: ["PERMISSION NEEDED", "WAKE SYSTEM OFFLINE"], stopped: ["PAUSED", "JARVIS PAUSED"],
-};
+const copy = uiConfig.status as Record<Mode, [string, string]>;
 
 function setMode(mode: Mode) {
   state.mode = mode; shell.setAttribute("data-mode", mode);
@@ -667,7 +672,7 @@ function updateVoiceInfo(info: DirectVoice) {
     ? '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path><path class="slash-mark" d="M4 4 20 20"></path></svg>'
     : '<svg viewBox="0 0 24 24"><rect x="8.25" y="3" width="7.5" height="11.5" rx="3.75"></rect><path d="M5.5 11.25v.75a6.5 6.5 0 0 0 13 0v-.75M12 18.5V22M8.75 22h6.5"></path></svg>';
   mic.setAttribute("aria-label", state.muted ? "取消静音" : info.voiceActive ? "静音麦克风" : "开启语音");
-  mic.querySelector("b")!.textContent = state.muted ? "MUTED" : info.voiceActive ? "UNMUTED" : "CODEX VOICE";
+  mic.querySelector("b")!.textContent = state.muted ? "MUTED" : "UNMUTED";
   mic.querySelector("small")!.textContent = state.muted ? "CLICK TO UNMUTE" : info.voiceActive ? "CLICK TO MUTE" : "V3 WEBRTC · DIRECT";
   $("#voice-auth").textContent = info.codexConnected
     ? `${info.protocol} · ${info.voiceActive ? "connected" : info.phase}`
@@ -676,6 +681,41 @@ function updateVoiceInfo(info: DirectVoice) {
     state.session = { threadId: info.threadId, cwd: workspace };
     $("#thread-id").textContent = info.threadId;
     localStorage.setItem(`${THREAD_KEY_PREFIX}${workspace}`, info.threadId);
+  }
+  if (info.voiceActive) resetVoiceIdleSleepTimer();
+  else clearVoiceIdleSleepTimer();
+}
+
+function clearVoiceIdleSleepTimer() {
+  if (voiceIdleSleepTimer !== null) {
+    window.clearTimeout(voiceIdleSleepTimer);
+    voiceIdleSleepTimer = null;
+  }
+}
+
+function resetVoiceIdleSleepTimer() {
+  clearVoiceIdleSleepTimer();
+  if (!state.directVoice?.voiceActive || voiceIdleSleepInFlight) return;
+  voiceIdleSleepTimer = window.setTimeout(() => {
+    void sleepVoiceAfterIdle();
+  }, VOICE_IDLE_SLEEP_MS);
+}
+
+async function sleepVoiceAfterIdle() {
+  if (voiceIdleSleepInFlight || !state.directVoice?.voiceActive) return;
+  voiceIdleSleepInFlight = true;
+  clearVoiceIdleSleepTimer();
+  appendStreamLine(uiConfig.messages.voiceIdleSleep, "system");
+  response.textContent = uiConfig.messages.voiceIdleSleep;
+  try {
+    await stopDirectVoice();
+    setMode("ready");
+    await armWakeListener();
+  } catch (error) {
+    appendStreamLine(`${uiConfig.messages.voiceIdleSleepFailed}：${String(error)}`, "error");
+    setMode("degraded");
+  } finally {
+    voiceIdleSleepInFlight = false;
   }
 }
 
@@ -718,6 +758,7 @@ async function handle(message: Message) {
     appendStreamLine("Codex Voice 已连接", "system");
     response.textContent = "Codex 官方 Voice 已上线。你现在可以直接和 Jarvis 对话。";
   } else if (method === "thread/realtime/transcript/delta") {
+    resetVoiceIdleSleepTimer();
     const delta = typeof params?.delta === "string" ? params.delta : "";
     if (params?.role === "assistant") {
       assistantTranscriptBuffer += delta;
@@ -757,6 +798,7 @@ async function handle(message: Message) {
     triggerCharacterAction("error");
     setMode("degraded");
     banner.hidden = false;
+    degradedTitle.textContent = uiConfig.messages.voiceConnectionTitle;
     const detail = params?.message ?? "Codex Voice realtime error";
     $("#degraded-copy").textContent = detail;
     response.textContent = detail;
@@ -784,7 +826,7 @@ async function handle(message: Message) {
     lastCompletedAgentText = "";
     state.agentWorking = true;
     appendStreamLine("开始处理任务", "task");
-    setMode("working"); setWorker("orchestrator", "Codex working");
+    setMode("working"); setWorker("orchestrator", "Working");
   } else if (method === "item/agentMessage/delta") {
     const delta = typeof params?.delta === "string" ? params.delta : "";
     agentMessageBuffer += delta;
@@ -1007,12 +1049,23 @@ async function startDirectVoice({ coldStart = false } = {}) {
     recoverableColdStartError = coldStart && isNotAllowedError(error);
     setMode("degraded");
     banner.hidden = false;
+    degradedTitle.textContent = /permission|麦克风|授权/i.test(String(error))
+      ? uiConfig.messages.voicePermissionTitle
+      : uiConfig.messages.voiceConnectionTitle;
     $("#degraded-copy").textContent = String(error);
     response.textContent = String(error);
     await armWakeListener();
   } finally {
     voiceStartInFlight = false;
   }
+}
+
+async function prepareWakeMemory() {
+  const status = await invoke<WakeMemoryStatus>("prepare_wake_context");
+  appendStreamLine(
+    `${uiConfig.messages.wakeMemoryLoaded} · ${status.initialContextChars + status.workingContextChars} 字符`,
+    "system",
+  );
 }
 
 async function waitForVoiceActive(timeout = 15_000) {
@@ -1043,16 +1096,12 @@ function setVoiceMuted(muted: boolean) {
   appendStreamLine(muted ? "麦克风已静音" : "麦克风已取消静音", "system");
 }
 
-async function toggleVoiceMute() {
-  if (!state.directVoice?.voiceActive && !peer) {
-    await startDirectVoice();
-    return;
-  }
-  setVoiceMuted(!state.muted);
-}
-
 if (currentWindow) {
   await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
+    if (payload.kind === "cipherpipe-message") {
+      appendStreamLine(`CipherPipe：${payload.message ?? payload.output ?? "收到消息"}`, "assistant", "cipherpipe");
+      return;
+    }
     if (payload.kind === "workflow" || payload.kind === "task") {
       const id = payload.runId ?? payload.taskId ?? payload.workflowId ?? payload.kind;
       const phase = payload.phase ?? "event";
@@ -1081,7 +1130,7 @@ if (currentWindow) {
   });
   await listen<QwenEvent>("qwen-event", ({ payload }) => {
     if (payload.error) {
-      appendStreamLine(`本地 Qwen：${payload.error}`, "error", "qwen-assistant");
+      appendStreamLine(`端侧模型：${payload.error}`, "error", "qwen-assistant");
       response.textContent = payload.error;
       setMode("degraded");
       return;
@@ -1123,7 +1172,7 @@ if (currentWindow) {
       }
     }
   });
-  await listen<WakeEvent>("jarvis-wake", ({ payload }) => {
+  await listen<WakeEvent>("jarvis-wake", async ({ payload }) => {
     transcript.textContent = "“嗨，Jarvis”";
     appendStreamLine("收到唤醒词：嗨 Jarvis", "user");
     state.manualStop = false;
@@ -1148,6 +1197,11 @@ if (currentWindow) {
       return;
     }
     banner.hidden = true;
+    try {
+      await prepareWakeMemory();
+    } catch (error) {
+      appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
+    }
     void startDirectVoice({ coldStart: payload.cold === true });
   });
 }
@@ -1158,6 +1212,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   lastUserTurnText = text;
   transcript.textContent = text;
   appendStreamLine(`文字指令：${text}`, "user");
+  resetVoiceIdleSleepTimer();
   input.value = "";
   if (!currentWindow) {
     response.textContent = "视觉预览：文字任务已切换为 Codex 工作态。";
@@ -1165,13 +1220,26 @@ $("#command-form").addEventListener("submit", async (event) => {
     return;
   }
   await ensureWorkspace();
-  const useLocalQwen = modelMode === "qwen"
-    || (modelMode === "hybrid" && !state.directVoice?.voiceActive);
-  if (state.directVoice?.voiceActive && !useLocalQwen) {
-    response.textContent = "已将文字作为用户话语注入当前 Codex Voice 会话。";
-    await invoke("append_codex_voice_text", { text });
+  const cipherpipeText = parseCipherPipeCommand(text);
+  if (cipherpipeText) {
+    setMode("working");
+    appendStreamLine("正在通过 CipherPipe 发送加密消息", "task");
+    try {
+      await invoke("cipherpipe_send", { text: cipherpipeText });
+      appendStreamLine("CipherPipe 消息已交给本机 Hub", "system");
+      response.textContent = "CipherPipe 消息已发送。";
+    } catch (error) {
+      response.textContent = `CipherPipe 发送失败：${String(error)}`;
+      appendStreamLine(response.textContent, "error");
+    }
+    setMode("ready");
     return;
   }
+  const useLocalQwen = shouldUseLocalQwen({
+    modelMode,
+    voiceActive: Boolean(state.directVoice?.voiceActive),
+    text,
+  });
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
@@ -1182,47 +1250,36 @@ $("#command-form").addEventListener("submit", async (event) => {
   if (useLocalQwen) {
     qwenAnswerBuffer = "";
     setMode("working");
-    appendStreamLine("本地 Qwen 开始处理", "task");
+    appendStreamLine("端侧模型开始处理", "task");
     try {
       const answer = await invoke<string>("local_qwen_chat", { text, workspace });
       const finalAnswer = answer.trim() || qwenAnswerBuffer.trim();
-      if (!finalAnswer) throw new Error("本地 Qwen 没有返回最终答案");
+      if (!finalAnswer) throw new Error("端侧模型没有返回最终答案");
       response.textContent = finalAnswer;
       appendStreamLine(finalAnswer, "assistant", "qwen-assistant");
       sealStreamLine("qwen-assistant");
       qwenAnswerBuffer = "";
       lastUserTurnText = "";
-      setMode("speaking");
-      await invoke("speak_text", { text: finalAnswer }).catch((error) => {
-        appendStreamLine(`本地语音失败：${String(error)}`, "error");
-      });
-      if (state.mode === "speaking") setMode("ready");
+      setMode("ready");
       return;
     } catch (error) {
       qwenAnswerBuffer = "";
       if (modelMode === "qwen") {
-        const message = `本地 Qwen 不可用：${String(error)}`;
+        const message = `端侧模型不可用：${String(error)}`;
         response.textContent = message;
         appendStreamLine(message, "error");
         setMode("degraded");
         return;
       }
-      response.textContent = "本地 Qwen 尚未连接，改用 Codex 原生任务。";
-      appendStreamLine("本地 Qwen 不可用，切换 Codex", "system");
+      response.textContent = "端侧模型尚未连接，改用 Codex 原生任务。";
+      appendStreamLine("端侧模型不可用，切换 Codex", "system");
     }
   }
-  // Keep typed turns on the same Codex Voice path as spoken turns. If the
-  // realtime session cannot be established, retain a local text-task fallback
-  // and speak its reply with the bundled offline voice.
-  try {
-    await startDirectVoice();
-    await waitForVoiceActive();
-    response.textContent = "已接入 Codex 原始语音，正在处理文字指令。";
-    await invoke("append_codex_voice_text", { text });
-    return;
-  } catch {
-    response.textContent = "Codex Voice 尚未连接，改用本地模型语音播报。";
-  }
+  // Typed commands always use the normal Codex task path. Realtime Voice is an
+  // audio transport and does not expose Jarvis's dynamic tool-call loop, so
+  // routing text through it would prevent semantic tool selection such as
+  // deciding to capture a camera image from a visual question.
+  response.textContent = "正在发送文字指令到 Codex 任务线程…";
   // Re-check the runtime on every text turn. This is cheap when the speaker
   // state is unchanged, and rebuilds the thread instructions if a verifier
   // changed Unknown/Allen access since the previous turn.
@@ -1245,9 +1302,7 @@ $("#command-form").addEventListener("submit", async (event) => {
   }
 });
 mic.addEventListener("click", () => {
-  void toggleVoiceMute().catch((error) => {
-    response.textContent = `麦克风状态切换失败：${String(error)}`;
-  });
+  setVoiceMuted(!state.muted);
 });
 $("#stop").addEventListener("click", async () => {
   if (state.mode === "stopped" || state.manualStop) {
@@ -1265,6 +1320,9 @@ $("#stop").addEventListener("click", async () => {
       }
     } catch (error) {
       setMode("degraded");
+      degradedTitle.textContent = /permission|麦克风|授权/i.test(String(error))
+        ? uiConfig.messages.voicePermissionTitle
+        : uiConfig.messages.voiceConnectionTitle;
       response.textContent = `恢复失败：${String(error)}`;
     }
     return;
@@ -1322,6 +1380,16 @@ $("#settings").addEventListener("click", () => {
   void refreshBridgeStatus();
 });
 $("#close-settings").addEventListener("click", () => settings.close());
+$("#request-all-permissions").addEventListener("click", async () => {
+  try {
+    const message = await invoke<string>("request_all_capabilities");
+    appendStreamLine(message, "system");
+    response.textContent = message;
+  } catch (error) {
+    appendStreamLine(String(error), "error");
+    response.textContent = String(error);
+  }
+});
 $("#bridge-enable").addEventListener("click", async () => {
   const bindAddress = bridgeBind.value.trim() || "127.0.0.1";
   const pairingToken = localStorage.getItem(BRIDGE_TOKEN_KEY);
@@ -1454,24 +1522,30 @@ if (currentWindow) {
     updateSpeakerAccess(state.speakerAccess);
     setWorker("orchestrator", "Wake word starting");
     setMode("ready");
-    const backgroundStart = await invoke<boolean>("startup_is_background");
-    if (!backgroundStart) {
-      const microphoneAuthorization = await invoke<string>("request_microphone_permission");
-      if (microphoneAuthorization !== "authorized") {
-        setMode("degraded");
-        banner.hidden = false;
-        $("#degraded-copy").textContent =
-          "请在系统设置 → 隐私与安全性 → 麦克风中允许 Jarvis Codex。";
-      }
+    try {
+      const model = await invoke<string>("on_device_model_status");
+      appendStreamLine(`端侧模型已连接（备用）：${model}`, "system");
+    } catch (error) {
+      appendStreamLine("端侧模型未发现，继续使用原生 Codex Voice", "system");
     }
-    await armWakeListener();
+    const backgroundStart = await invoke<boolean>("startup_is_background");
+    // Read capability state before arming the listener. macOS only prompts for
+    // Speech Recognition the first time; later launches reuse the decision.
+    const permissions = await invoke<{ microphone: string; speechRecognition: string; location: string }>("permission_status");
+    const speechPermission = await invoke<string>("speech_permission_status").catch(() => "unknown");
+    state.wake = { enabled: false, ready: false, authorization: permissions.microphone === "authorized" ? speechPermission : permissions.microphone };
+    $("#wake-auth").textContent = state.wake.authorization;
+    // The wake listener needs Speech Recognition. Ask macOS only when this
+    // permission is still undecided; after the one-time decision, startup
+    // reads the status and never shows the prompt again.
+    if (!backgroundStart) {
+      await armWakeListener();
+    }
     updateVoiceInfo(await invoke<DirectVoice>("direct_voice_status"));
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
     } else if (!backgroundStart && state.mode === "ready") {
-      // A normal launch should be immediately usable. The wake listener is
-      // still used for later re-entry after the session is stopped.
-      void startDirectVoice();
+      response.textContent = "Jarvis 已启动，等待你启用 Codex Voice。";
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {
@@ -1495,7 +1569,7 @@ if (currentWindow) {
   if (["acknowledge", "approval", "complete", "error"].includes(previewActionValue ?? "")) {
     window.setTimeout(() => triggerCharacterAction(previewActionValue as CharacterAction, 1800), 180);
   }
-  setWorker("orchestrator", visualPreviewMode === "working" ? "Codex working" : "Visual preview");
+  setWorker("orchestrator", visualPreviewMode === "working" ? "Working" : "Visual preview");
   if (visualPreviewMode === "working") {
     setWorker("developer", "Working");
   }

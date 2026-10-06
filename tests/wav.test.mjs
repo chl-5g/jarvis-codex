@@ -6,7 +6,11 @@ const frontend = await readFile(new URL("../src/main.ts", import.meta.url), "utf
 const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
-const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
+const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
+const promptsConfig = await readFile(new URL("../config/prompts.json", import.meta.url), "utf8");
+const uiConfig = await readFile(new URL("../config/ui.json", import.meta.url), "utf8");
+const voiceConfig = await readFile(new URL("../config/voice.json", import.meta.url), "utf8");
+const toolsConfig = await readFile(new URL("../config/tools.json", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
@@ -17,6 +21,7 @@ const wakeHelper = await readFile(
   new URL("../src-tauri/wake-helper/JarvisWakeListener.swift", import.meta.url),
   "utf8",
 );
+const wakeConfig = await readFile(new URL("../config/wake.json", import.meta.url), "utf8");
 const entitlements = await readFile(
   new URL("../src-tauri/Entitlements.plist", import.meta.url),
   "utf8",
@@ -29,6 +34,8 @@ const tauriConfig = await readFile(
   new URL("../src-tauri/tauri.conf.json", import.meta.url),
   "utf8",
 );
+const infoPlist = await readFile(new URL("../src-tauri/Info.plist", import.meta.url), "utf8");
+const installScript = await readFile(new URL("../scripts/install-release.sh", import.meta.url), "utf8");
 const codexWrapper = await readFile(
   new URL("../src-tauri/codex", import.meta.url),
   "utf8",
@@ -57,6 +64,18 @@ test("Voice uses Codex app-server V3 WebRTC directly", () => {
   assert.doesNotMatch(frontend, /OPENAI_API_KEY|ChatGPT.*button|hotkey/i);
 });
 
+test("Voice capability results are returned through native Codex tools", () => {
+  assert.match(backend, /item\/tool\/call/);
+  assert.match(backend, /dynamicTools/);
+  assert.doesNotMatch(frontend, /routeVoiceCapabilityTask/);
+});
+
+test("camera intent is described as autonomous visual inspection", () => {
+  assert.match(toolsConfig, /what is in front of them/);
+  assert.match(backend, /inputImage/);
+  assert.match(backend, /data:image\/jpeg;base64/);
+});
+
 test("bundled Codex runtime inherits the macOS proxy for realtime connectivity", () => {
   assert.match(tauriConfig, /"codex"/);
   assert.match(codexWrapper, /scutil --proxy/);
@@ -65,8 +84,14 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(codexWrapper, /model=gpt-5\.6-sol/);
   assert.match(backend, /JARVIS_MODEL: &str = "gpt-5\.6-sol"/);
   assert.match(backend, /"model": JARVIS_MODEL/);
-  assert.match(backend, /directly use Codex's native file-change and command-execution tools/);
-  assert.match(backend, /Do not route direct file edits through Obsidian or any other GUI/);
+  assert.match(promptsConfig, /directly use Codex's native file-change and command-execution tools/);
+  assert.match(promptsConfig, /Do not route direct file edits through Obsidian or any other GUI/);
+});
+
+test("bundled Codex runtime prefers one stable local CLI identity", () => {
+  assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN:-\$HOME\/\.local\/bin\/codex/);
+  assert.doesNotMatch(codexWrapper, /ChatGPT\.app/);
+  assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -91,37 +116,77 @@ test("wake phrase opens the same direct Voice path", () => {
   assert.match(wakeHelper, /"--test-wake"/);
 });
 
+test("wake reads memory before opening Voice", () => {
+  assert.match(frontend, /prepare_wake_context/);
+  assert.match(frontend, /await prepareWakeMemory\(\)/);
+  assert.match(backend, /wake memory loaded/);
+});
+
+test("Voice sleeps after configured inactivity and waits for wake", () => {
+  assert.match(frontend, /voiceIdleSleepTimer/);
+  assert.match(frontend, /voiceIdleSleepMs/);
+  assert.match(frontend, /VITE_VOICE_IDLE_SLEEP_MS/);
+  assert.match(frontend, /sleepVoiceAfterIdle\(\)/);
+  assert.match(frontend, /await armWakeListener\(\)/);
+  assert.match(frontend, /VOICE_IDLE_SLEEP_MS/);
+  assert.match(voiceConfig, /"voiceIdleSleepMs": 300000/);
+});
+
+test("tool descriptions are kept outside prompt policy", () => {
+  assert.match(toolsConfig, /"descriptions"/);
+  assert.doesNotMatch(promptsConfig, /"toolDescriptions"/);
+});
+
+test("Voice degradation copy is configuration-driven", () => {
+  assert.match(frontend, /uiConfig\.messages\.voicePermissionTitle/);
+  assert.match(frontend, /uiConfig\.messages\.voicePermissionCopy/);
+  assert.match(frontend, /uiConfig\.messages\.voiceConnectionTitle/);
+  assert.match(uiConfig, /"voicePermissionCopy"/);
+});
+
+test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
+  assert.match(wakeConfig, /你好jarvis/);
+  assert.match(wakeConfig, /"你好"/);
+  assert.match(wakeConfig, /你好贾维斯/);
+  assert.match(wakeConfig, /hi jarvis/);
+  assert.match(wakeConfig, /hijarvis/);
+  assert.match(wakeHelper, /forResource: "wake"/);
+});
+
 test("STOP suppresses transcript-tail handoffs and interrupts late turns", () => {
   assert.match(backend, /"flushTranscriptTailOnSessionEnd":\s*false/);
   assert.match(backend, /for _ in 0\.\.6/);
   assert.match(backend, /"turn\/interrupt"/);
 });
 
-test("text input can join the active Voice conversation", () => {
-  assert.match(frontend, /append_codex_voice_text/);
-  assert.match(backend, /"thread\/realtime\/appendText"/);
+test("typed commands use the normal Codex task turn", () => {
+  assert.doesNotMatch(frontend, /文字指令已进入原生 Codex Voice/);
+  assert.match(frontend, /Realtime Voice is an[\s\S]*audio transport/);
+  assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
+  assert.match(backend, /"turn\/start"/);
 });
 
 test("workspace is initialized before voice or text turns", () => {
   assert.match(frontend, /async function ensureWorkspace\(\)/);
-  assert.match(frontend, /const PROJECT_WORKSPACE = "\/Users\/caihaolun\/Jarvis-codex\/agent-workspace"/);
+  assert.match(frontend, /import pathsConfig from "\$PROJECT_PATH\/config\/paths\.json"/);
+  assert.match(frontend, /const PROJECT_WORKSPACE = `\$\{PROJECT_ROOT\}\/\$\{pathsConfig\.workspace\}`/);
   assert.match(frontend, /let workspace = PROJECT_WORKSPACE/);
   assert.match(frontend, /value !== "\/"/);
   assert.match(frontend, /await ensureWorkspace\(\);\n  voiceStartInFlight/);
-  assert.match(frontend, /await ensureWorkspace\(\);\n  const useLocalQwen/);
+  assert.match(frontend, /await ensureWorkspace\(\);[\s\S]*const useLocalQwen = shouldUseLocalQwen/);
   assert.match(frontend, /savedWorkspace !== "\/"/);
 });
 
 test("Codex Voice is primary and local speech is only the fallback", () => {
   assert.doesNotMatch(frontend, /voiceReplyRoute|containsChinese|local-zh/);
   assert.match(frontend, /voice: "cove"/);
-  assert.match(frontend, /Codex Voice 尚未连接，改用本地模型语音播报/);
+  assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
   assert.match(frontend, /invoke\("speak_text"/);
 });
 
 test("normal launch opens Codex Voice automatically", () => {
   assert.match(frontend, /!backgroundStart && state\.mode === "ready"/);
-  assert.match(frontend, /void startDirectVoice\(\)/);
+  assert.match(frontend, /等待你启用 Codex Voice/);
 });
 
 test("full permission auto-accepts server requests", () => {
@@ -130,42 +195,53 @@ test("full permission auto-accepts server requests", () => {
   assert.match(frontend, /resolve_server_request.*approved: true/);
 });
 
+test("macOS file access uses one installed app identity", () => {
+  assert.match(infoPlist, /NSDesktopFolderUsageDescription/);
+  assert.match(infoPlist, /NSDocumentsFolderUsageDescription/);
+  assert.match(infoPlist, /NSDownloadsFolderUsageDescription/);
+  assert.match(installScript, /\/Applications\/Jarvis Codex\.app/);
+  assert.match(installScript, /ditto/);
+});
+
 test("text input button is labelled SEND", () => {
   assert.match(frontend, /<button>SEND<\/button>/);
 });
 
-test("voice button mutes the microphone without stopping the Voice session", () => {
+test("voice button is only a microphone mute toggle", () => {
   assert.match(frontend, /mic\.addEventListener\("click"/);
-  assert.match(frontend, /state\.directVoice\?\.voiceActive \|\| peer/);
-  assert.match(frontend, /toggleVoiceMute/);
-  assert.match(frontend, /track\.enabled = !state\.muted/);
+  assert.match(frontend, /setVoiceMuted\(!state\.muted\)/);
+  assert.match(frontend, /track\.enabled = !muted/);
   assert.match(frontend, /MUTED/);
   assert.match(frontend, /UNMUTED/);
   const micHandler = frontend.match(/mic\.addEventListener\("click"[\s\S]*?\n\}\);/)?.[0] ?? "";
-  assert.doesNotMatch(micHandler, /stopDirectVoice/);
+  assert.doesNotMatch(micHandler, /startDirectVoice|toggleVoiceMute/);
   assert.match(frontend, /class="slash-mark"/);
   assert.match(style, /\.mic \.slash-mark/);
 });
 
-test("idle text input starts Codex Voice so replies keep the original Codex voice", () => {
-  assert.match(frontend, /await startDirectVoice\(\)/);
-  assert.match(frontend, /await waitForVoiceActive\(\)/);
-  assert.match(frontend, /Codex Voice 尚未连接/);
+test("action and URL text bypass local Qwen in hybrid mode", () => {
+  assert.match(frontend, /shouldUseLocalQwen/);
+});
+
+test("idle text input uses the Codex task thread", () => {
+  assert.match(frontend, /await invoke\("send_text", \{ text \}\)/);
+  assert.match(frontend, /turn\/start/);
 });
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
-  assert.match(frontend, /jarvis\.threadId:v2:/);
-  assert.match(backend, /HIGHEST PRIORITY FILE RULE/);
-  assert.match(backend, /paths under ~\/notes/);
-  assert.match(backend, /previous conversation preference to use Obsidian is superseded/);
-  assert.match(backend, /Do not route direct file edits through Obsidian/);
+  assert.match(frontend, /jarvis\.threadId:v4:/);
+  assert.match(promptsConfig, /HIGHEST PRIORITY FILE RULE/);
+  assert.match(promptsConfig, /paths under ~\/notes/);
+  assert.match(promptsConfig, /previous conversation preference to use Obsidian is superseded/);
+  assert.match(promptsConfig, /Do not route direct file edits through Obsidian/);
+  assert.match(backend, /config::prompt\("codexBaseInstructions"\)/);
 });
 
 test("pause control can resume Jarvis and swaps to a play icon", () => {
   assert.match(frontend, /state\.mode === "stopped" \|\| state\.manualStop/);
   assert.match(frontend, /正在恢复 Jarvis Voice/);
   assert.match(frontend, /stopLabel\.textContent = paused \? "RESUME" : "PAUSE"/);
-  assert.match(frontend, /stopped: \["PAUSED", "JARVIS PAUSED"\]/);
+  assert.match(frontend, /uiConfig\.status/);
   assert.match(frontend, /play-mark/);
 });
 
@@ -188,7 +264,8 @@ test("production configuration persists workspace and resumes threads", () => {
   assert.match(frontend, /jarvis\.threadId:/);
   assert.match(backend, /"thread\/resume"/);
   assert.match(backend, /validated_workspace/);
-  assert.match(wakeHelper, /requiresOnDeviceRecognition = true/);
+  assert.match(wakeHelper, /requiresOnDeviceRecognition = false/);
+  assert.match(wakeHelper, /contextualStrings = phrases/);
 });
 
 test("user can create a fresh Codex thread without deleting history", () => {
@@ -253,8 +330,9 @@ test("local Qwen can call the audited tool gateway and keeps the selected worksp
   assert.match(qwenBackend, /MAX_TOOL_ROUNDS/);
   assert.match(qwenBackend, /tools::execute/);
   assert.match(qwenBackend, /"role":"tool"/);
-  assert.match(qwenBackend, /JARVIS_QWEN_TOOLS/);
-  assert.match(qwenBackend, /Agent 工具层已经接入并可用/);
+  assert.match(qwenBackend, /JARVIS_ON_DEVICE_TOOLS/);
+  assert.match(qwenBackend, /config::prompt\("toolPolicy"\)/);
+  assert.match(promptsConfig, /Agent 工具层已经接入并可用/);
   assert.match(backend, /async fn local_qwen_chat/);
   assert.match(backend, /validated_workspace/);
   assert.match(frontend, /local_qwen_chat.*workspace/);
@@ -273,10 +351,10 @@ test("Codex, Qwen, tools, workflows, and tasks publish one local event envelope"
   assert.match(tasksBackend, /crate::events::emit/);
 });
 
-test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {
+test("Jarvis exposes online-first, local Qwen, and Codex model routes", () => {
   assert.match(frontend, /jarvis\.modelMode/);
-  assert.match(frontend, /本地 Qwen/);
-  assert.match(frontend, /混合模式/);
+  assert.match(frontend, /端侧模型/);
+  assert.match(frontend, /在线优先/);
   assert.match(frontend, /Codex 原生/);
 });
 
@@ -339,4 +417,15 @@ test("wake activates the macOS app before focusing the Jarvis window", () => {
   assert.match(backend, /set_always_on_top\(true\)/);
   assert.match(backend, /set_always_on_top\(false\)/);
   assert.match(backend, /raise_jarvis_window\(&app\)/);
+});
+
+test("text routing sends action and URL prompts to Codex", async () => {
+  const routing = await import("../src/text-routing.mjs");
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "今天天气怎么样" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "请访问 https://github.com/chl-5g/cipherpipe" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: false, text: "打开这个仓库" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "qwen", voiceActive: false, text: "请访问 https://example.com" }), false);
+  assert.equal(routing.shouldUseLocalQwen({ modelMode: "hybrid", voiceActive: true, text: "普通问题" }), false);
+  assert.equal(routing.parseCipherPipeCommand("发给 CipherPipe：请回复"), "请回复");
+  assert.equal(routing.parseCipherPipeCommand("普通问题"), null);
 });

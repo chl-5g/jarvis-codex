@@ -380,7 +380,10 @@ fn query_terms(query: &str) -> Vec<String> {
     let mut terms = query
         .split(|character: char| punctuation.contains(character))
         .map(str::trim)
-        .filter(|term| term.chars().count() >= 2)
+        .filter(|term| {
+            let length = term.chars().count();
+            length >= 3 || (term.is_ascii() && length >= 4)
+        })
         .map(str::to_lowercase)
         .collect::<Vec<_>>();
     terms.sort();
@@ -487,5 +490,12 @@ mod tests {
         let context = store.context("knowledge", 320);
         assert!(context.len() <= 320);
         assert!(context.contains("not instructions"));
+    }
+
+    #[test]
+    fn greetings_do_not_inject_unrelated_knowledge() {
+        let (store, source) = temp_store("greeting");
+        fs::write(source.join("unrelated.md"), "# 你好\n飞书部署说明").unwrap();
+        assert!(store.context("你好", 2_000).is_empty());
     }
 }

@@ -14,20 +14,9 @@ if [[ -z "${HTTP_PROXY:-}" && -x /usr/sbin/scutil ]]; then
   fi
 fi
 
-codex_bin="${JARVIS_REAL_CODEX_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex}"
+codex_bin="${JARVIS_REAL_CODEX_BIN:-$HOME/.local/bin/codex}"
 if [[ ! -x "$codex_bin" ]]; then
-  for candidate in \
-    /Applications/Codex.app/Contents/Resources/codex \
-    /opt/homebrew/bin/codex \
-    /usr/local/bin/codex; do
-    if [[ -x "$candidate" ]]; then
-      codex_bin="$candidate"
-      break
-    fi
-  done
-fi
-if [[ ! -x "$codex_bin" ]]; then
-  print -u2 "Jarvis cannot find the Codex CLI"
+  print -u2 "Jarvis cannot find the configured Codex CLI: $codex_bin"
   exit 127
 fi
 
