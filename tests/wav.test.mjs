@@ -65,6 +65,12 @@ test("Voice capability results are returned through native Codex tools", () => {
   assert.doesNotMatch(frontend, /routeVoiceCapabilityTask/);
 });
 
+test("camera intent is described as autonomous visual inspection", () => {
+  assert.match(promptsConfig, /what is in front of them/);
+  assert.match(backend, /inputImage/);
+  assert.match(backend, /data:image\/jpeg;base64/);
+});
+
 test("bundled Codex runtime inherits the macOS proxy for realtime connectivity", () => {
   assert.match(tauriConfig, /"codex"/);
   assert.match(codexWrapper, /scutil --proxy/);
@@ -75,6 +81,11 @@ test("bundled Codex runtime inherits the macOS proxy for realtime connectivity",
   assert.match(backend, /"model": JARVIS_MODEL/);
   assert.match(backend, /directly use Codex's native file-change and command-execution tools/);
   assert.match(backend, /Do not route direct file edits through Obsidian or any other GUI/);
+});
+
+test("bundled Codex runtime prefers one stable local CLI identity", () => {
+  assert.ok(codexWrapper.indexOf('$HOME/.local/bin/codex') < codexWrapper.indexOf('/Applications/ChatGPT.app'));
+  assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN/);
 });
 
 test("wake phrase opens the same direct Voice path", () => {
@@ -101,6 +112,7 @@ test("wake phrase opens the same direct Voice path", () => {
 
 test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () => {
   assert.match(wakeConfig, /你好jarvis/);
+  assert.match(wakeConfig, /"你好"/);
   assert.match(wakeConfig, /你好贾维斯/);
   assert.match(wakeConfig, /hi jarvis/);
   assert.match(wakeConfig, /hijarvis/);
@@ -114,8 +126,8 @@ test("STOP suppresses transcript-tail handoffs and interrupts late turns", () =>
 });
 
 test("typed commands use the normal Codex task turn", () => {
-  assert.match(frontend, /Realtime appendText only feeds the experimental audio session input/);
-  assert.match(frontend, /await stopDirectVoice\(\);/);
+  assert.match(frontend, /append_codex_voice_text/);
+  assert.match(frontend, /文字指令已发送到原生 Codex Voice/);
   assert.match(frontend, /正在发送文字指令到 Codex 任务线程/);
   assert.match(backend, /"turn\/start"/);
 });
@@ -175,7 +187,7 @@ test("idle text input uses the Codex task thread", () => {
 });
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
-  assert.match(frontend, /jarvis\.threadId:v3:/);
+  assert.match(frontend, /jarvis\.threadId:v4:/);
   assert.match(backend, /HIGHEST PRIORITY FILE RULE/);
   assert.match(backend, /paths under ~\/notes/);
   assert.match(backend, /previous conversation preference to use Obsidian is superseded/);

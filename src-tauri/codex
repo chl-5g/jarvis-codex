@@ -14,11 +14,15 @@ if [[ -z "${HTTP_PROXY:-}" && -x /usr/sbin/scutil ]]; then
   fi
 fi
 
-codex_bin="${JARVIS_REAL_CODEX_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex}"
+codex_bin="${JARVIS_REAL_CODEX_BIN:-}"
 if [[ ! -x "$codex_bin" ]]; then
   for candidate in \
-    /Applications/Codex.app/Contents/Resources/codex \
+    "$HOME/.local/bin/codex" \
+    "$HOME/.codex/bin/codex" \
     /opt/homebrew/bin/codex \
+    /usr/local/bin/codex \
+    /Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex \
+    /Applications/Codex.app/Contents/Resources/codex \
     /usr/local/bin/codex; do
     if [[ -x "$candidate" ]]; then
       codex_bin="$candidate"

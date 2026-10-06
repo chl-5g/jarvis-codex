@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -426,13 +427,29 @@ impl CodexRuntime {
                             )
                             .await;
                             let content = if result.success {
-                                result.output
+                                result.output.clone()
                             } else {
-                                result.error.unwrap_or_default()
+                                result.error.clone().unwrap_or_default()
                             };
+                            let mut content_items = vec![json!({
+                                "type": "inputText",
+                                "text": content
+                            })];
+                            if result.success && result.tool_name == "capture_camera" {
+                                if let Ok(photo) = serde_json::from_str::<Value>(&result.output) {
+                                    if let Some(path) = photo.get("path").and_then(Value::as_str) {
+                                        if let Ok(bytes) = fs::read(path) {
+                                            content_items.push(json!({
+                                                "type": "inputImage",
+                                                "imageUrl": format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes))
+                                            }));
+                                        }
+                                    }
+                                }
+                            }
                             let _ = runtime.write(&json!({
                                 "id": request["id"],
-                                "result": {"success": result.success, "contentItems": [{"type":"inputText", "text":content}]}
+                                "result": {"success": result.success, "contentItems": content_items}
                             })).await;
                         });
                     }
@@ -1406,7 +1423,11 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
 }
 
 #[tauri::command]
-async fn send_text(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<(), String> {
+async fn send_text(
+    _app: AppHandle,
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
     let speaker_access = effective_speaker_access(*state.speaker_access.read().await);
     if speaker_access == SpeakerAccess::Rejected {
         return Err("未识别的说话人".to_owned());
@@ -1417,7 +1438,6 @@ async fn send_text(app: AppHandle, state: State<'_, AppState>, text: String) -> 
     }
     let thread_id = runtime.thread().await?;
     crate::logging::conversation("user", text.trim(), "codex");
-    let text = with_capability_context(&app, &runtime, &text).await;
     let text = with_memory_context(&text);
     runtime
         .request(
@@ -1429,47 +1449,6 @@ async fn send_text(app: AppHandle, state: State<'_, AppState>, text: String) -> 
         )
         .await?;
     Ok(())
-}
-
-async fn with_capability_context(app: &AppHandle, runtime: &CodexRuntime, text: &str) -> String {
-    let lower = text.to_lowercase();
-    let tool_name = if lower.contains("天气")
-        || lower.contains("气温")
-        || lower.contains("temperature")
-        || lower.contains("weather")
-    {
-        Some("current_weather")
-    } else if lower.contains("位置")
-        || lower.contains("在哪里")
-        || lower.contains("哪个城市")
-        || lower.contains("location")
-    {
-        Some("current_location")
-    } else if lower.contains("摄像头") || lower.contains("相机") || lower.contains("camera") {
-        Some("capture_camera")
-    } else {
-        None
-    };
-    let Some(tool_name) = tool_name else {
-        return text.to_owned();
-    };
-    let workspace = PathBuf::from(&runtime.workspace);
-    let result = tools::execute(app.clone(), &workspace, tool_name, json!({}), false).await;
-    if result.success {
-        format!(
-            "{text}\n\n{}\n{}",
-            config::prompt("capabilityContextPrefix"),
-            result.output
-        )
-    } else {
-        format!(
-            "{text}\n\n{}\n{}",
-            config::prompt("capabilityContextFailure"),
-            result
-                .error
-                .unwrap_or_else(|| "unknown capability error".to_owned())
-        )
-    }
 }
 
 #[tauri::command]

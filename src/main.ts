@@ -73,7 +73,7 @@ const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
-const THREAD_KEY_PREFIX = "jarvis.threadId:v3:";
+const THREAD_KEY_PREFIX = "jarvis.threadId:v4:";
 // Use a new key so an older session that was left in safe mode does not make
 // the single-user deployment ask for approval on every task.
 const PERMISSION_KEY = "jarvis.permissionMode:v2";
@@ -1180,19 +1180,24 @@ $("#command-form").addEventListener("submit", async (event) => {
     voiceActive: Boolean(state.directVoice?.voiceActive),
     text,
   });
-  if (state.directVoice?.voiceActive && !useLocalQwen) {
-    // Realtime appendText only feeds the experimental audio session input and
-    // does not start a normal Codex task turn. Typed commands must use the
-    // same turn/start path as the offline Codex route so tools and history see
-    // the request as a real user message.
-    await stopDirectVoice();
-    response.textContent = "已切换到 Codex 任务线程，正在处理文字指令。";
-  }
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
     setMode("ready");
     void invoke("speak_text", { text: message }).catch(() => undefined);
+    return;
+  }
+  if (state.directVoice?.voiceActive && !useLocalQwen) {
+    setMode("listening");
+    response.textContent = "文字指令已发送到原生 Codex Voice…";
+    try {
+      await invoke("append_codex_voice_text", { text });
+      appendStreamLine("文字指令已进入原生 Codex Voice", "system");
+    } catch (error) {
+      response.textContent = `Codex Voice 文字输入失败：${String(error)}`;
+      appendStreamLine(response.textContent, "error");
+      setMode("degraded");
+    }
     return;
   }
   if (state.directVoice?.voiceActive) {

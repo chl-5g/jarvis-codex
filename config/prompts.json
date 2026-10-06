@@ -19,7 +19,7 @@
     "current_location": "Resolve the user's current area through the operating-system location capability.",
     "current_weather": "Get current weather after resolving the user's current area.",
     "open_camera": "Open the system camera application when the user explicitly asks to use the camera.",
-    "capture_camera": "Capture one image from the camera when the user explicitly asks for a camera image.",
+    "capture_camera": "Capture one image for visual understanding. Use this automatically when the user asks what is in front of them, what they are looking at, what the camera sees, or asks to identify an object or scene; do not require the user to say 'open the camera'.",
     "request_capability": "Open the macOS privacy settings page for a capability that needs user authorization."
   }
 }
