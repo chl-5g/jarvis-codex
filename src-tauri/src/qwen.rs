@@ -14,6 +14,7 @@ use tokio::{
 };
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8080/v1/chat/completions";
+const DEFAULT_TIMEOUT_SECONDS: &str = "20";
 const DEFAULT_MODEL: &str = "/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit";
 const MAX_TOOL_ROUNDS: usize = 4;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
@@ -150,7 +151,7 @@ async fn request_round(
         "stream": true,
         "max_tokens": 1024,
         "temperature": 0.4,
-        "chat_template_kwargs": {"enable_thinking": true, "reasoning_effort": "medium", "preserve_thinking": false}
+        "chat_template_kwargs": {"enable_thinking": env_flag("JARVIS_QWEN_THINKING", false), "reasoning_effort": "medium", "preserve_thinking": false}
     });
     if tools_enabled {
         body["tools"] = Value::Array(schemas);
@@ -158,12 +159,14 @@ async fn request_round(
     }
     let endpoint =
         std::env::var("JARVIS_QWEN_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
+    let timeout_seconds = std::env::var("JARVIS_QWEN_TIMEOUT_SECONDS")
+        .unwrap_or_else(|_| DEFAULT_TIMEOUT_SECONDS.to_owned());
     let mut child = Command::new("curl")
         .args([
             "-fsS",
             "--no-buffer",
             "--max-time",
-            "120",
+            timeout_seconds.as_str(),
             "-H",
             "Content-Type: application/json",
             "--data-binary",
