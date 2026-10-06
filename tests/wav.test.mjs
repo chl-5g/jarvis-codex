@@ -257,7 +257,7 @@ test("local Qwen can call the audited tool gateway and keeps the selected worksp
   assert.match(qwenBackend, /MAX_TOOL_ROUNDS/);
   assert.match(qwenBackend, /tools::execute/);
   assert.match(qwenBackend, /"role":"tool"/);
-  assert.match(qwenBackend, /JARVIS_QWEN_TOOLS/);
+  assert.match(qwenBackend, /JARVIS_ON_DEVICE_TOOLS/);
   assert.match(qwenBackend, /Agent 工具层已经接入并可用/);
   assert.match(backend, /async fn local_qwen_chat/);
   assert.match(backend, /validated_workspace/);

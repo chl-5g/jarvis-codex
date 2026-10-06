@@ -13,7 +13,7 @@ use tokio::{
     process::Command,
 };
 
-const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8080/v1/chat/completions";
+const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:4000/v1/chat/completions";
 const DEFAULT_TIMEOUT_SECONDS: &str = "20";
 const MAX_TOOL_ROUNDS: usize = 4;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
@@ -72,7 +72,7 @@ struct QwenRound {
 pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<String, String> {
     let text = text.trim();
     if text.is_empty() {
-        return Err("本地 Qwen 输入不能为空".to_owned());
+        return Err("端侧模型 输入不能为空".to_owned());
     }
     let store = crate::memory::MemoryStore::default();
     let memory = store.recall(text, 4_000);
@@ -112,7 +112,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
         let response = request_round(&app, &messages, schemas.clone(), reasoning).await?;
         if response.tool_calls.is_empty() {
             if response.content.trim().is_empty() {
-                return Err("本地 Qwen 没有返回最终答案".to_owned());
+                return Err("端侧模型 没有返回最终答案".to_owned());
             }
             emit_qwen_event(&app, None, true, None);
             let _ = store.save_episode(
@@ -123,7 +123,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
             return Ok(response.content);
         }
         if round == MAX_TOOL_ROUNDS {
-            return Err("本地 Qwen 工具调用次数已达到上限".to_owned());
+            return Err("端侧模型 工具调用次数已达到上限".to_owned());
         }
         let calls = response
             .tool_calls
@@ -164,7 +164,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
             messages.push(json!({"role":"tool", "tool_call_id": call.id, "content": content}));
         }
     }
-    Err("本地 Qwen 请求未完成".to_owned())
+    Err("端侧模型 请求未完成".to_owned())
 }
 
 async fn request_round(
@@ -173,10 +173,9 @@ async fn request_round(
     schemas: Vec<Value>,
     reasoning: bool,
 ) -> Result<QwenRound, String> {
-    let tools_enabled = !schemas.is_empty() && env_flag("JARVIS_QWEN_TOOLS", true);
-    let endpoint =
-        std::env::var("JARVIS_QWEN_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
-    let model = std::env::var("JARVIS_QWEN_MODEL")
+    let tools_enabled = !schemas.is_empty() && env_flag("JARVIS_ON_DEVICE_TOOLS", true);
+    let endpoint = endpoint();
+    let model = std::env::var("JARVIS_ON_DEVICE_MODEL")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or(discover_model(&endpoint).await)
@@ -193,7 +192,7 @@ async fn request_round(
         body["tools"] = Value::Array(schemas);
         body["tool_choice"] = Value::String("auto".to_owned());
     }
-    let timeout_seconds = std::env::var("JARVIS_QWEN_TIMEOUT_SECONDS")
+    let timeout_seconds = std::env::var("JARVIS_ON_DEVICE_TIMEOUT_SECONDS")
         .unwrap_or_else(|_| DEFAULT_TIMEOUT_SECONDS.to_owned());
     let mut child = Command::new("curl")
         .args([
@@ -212,23 +211,23 @@ async fn request_round(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|error| format!("无法启动本地 Qwen 请求：{error}"))?;
-    let mut stdin = child.stdin.take().ok_or("无法连接本地 Qwen stdin")?;
+        .map_err(|error| format!("无法启动端侧模型 请求：{error}"))?;
+    let mut stdin = child.stdin.take().ok_or("无法连接端侧模型 stdin")?;
     stdin
         .write_all(body.to_string().as_bytes())
         .await
-        .map_err(|error| format!("写入本地 Qwen 请求失败：{error}"))?;
+        .map_err(|error| format!("写入端侧模型 请求失败：{error}"))?;
     stdin
         .shutdown()
         .await
-        .map_err(|error| format!("关闭本地 Qwen 请求失败：{error}"))?;
-    let stdout = child.stdout.take().ok_or("无法读取本地 Qwen 输出")?;
+        .map_err(|error| format!("关闭端侧模型 请求失败：{error}"))?;
+    let stdout = child.stdout.take().ok_or("无法读取端侧模型 输出")?;
     let mut lines = BufReader::new(stdout).lines();
     let mut round = QwenRound::default();
     while let Some(line) = lines
         .next_line()
         .await
-        .map_err(|error| format!("读取本地 Qwen 输出失败：{error}"))?
+        .map_err(|error| format!("读取端侧模型 输出失败：{error}"))?
     {
         let Some(payload) = line.strip_prefix("data:").map(str::trim) else {
             continue;
@@ -248,9 +247,9 @@ async fn request_round(
     let status = child
         .wait()
         .await
-        .map_err(|error| format!("本地 Qwen 进程失败：{error}"))?;
+        .map_err(|error| format!("端侧模型 进程失败：{error}"))?;
     if !status.success() {
-        return Err("本地 Qwen 服务不可用，请检查 8080 服务".to_owned());
+        return Err("端侧模型 服务不可用，请检查 LiteLLM Gateway".to_owned());
     }
     Ok(round)
 }
@@ -259,7 +258,7 @@ async fn discover_model(endpoint: &str) -> Option<String> {
     let models_endpoint = endpoint
         .strip_suffix("/chat/completions")
         .map(|base| format!("{base}/models"))
-        .unwrap_or_else(|| "http://127.0.0.1:8080/v1/models".to_owned());
+        .unwrap_or_else(|| "http://127.0.0.1:4000/v1/models".to_owned());
     let output = Command::new("curl")
         .args(["-fsS", "--max-time", "3", &models_endpoint])
         .output()
@@ -273,11 +272,17 @@ async fn discover_model(endpoint: &str) -> Option<String> {
 }
 
 pub async fn detect_model() -> Result<String, String> {
-    let endpoint =
-        std::env::var("JARVIS_QWEN_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned());
+    let endpoint = endpoint();
     discover_model(&endpoint)
         .await
         .ok_or_else(|| "端侧模型接口不可用或未返回模型".to_owned())
+}
+
+fn endpoint() -> String {
+    if let Ok(base) = std::env::var("JARVIS_LITELLM_BASE_URL") {
+        return format!("{}/chat/completions", base.trim_end_matches('/'));
+    }
+    std::env::var("JARVIS_ON_DEVICE_ENDPOINT").unwrap_or_else(|_| DEFAULT_ENDPOINT.to_owned())
 }
 
 fn collect_round(round: &mut QwenRound, value: &Value, app: Option<&AppHandle>) {

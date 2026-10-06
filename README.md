@@ -116,9 +116,9 @@ removed.
 ## Offline local Qwen and the Agent tool layer
 
 Jarvis includes a fully local text path. Select `Local Qwen` in Settings to use
-the OpenAI-compatible endpoint at `127.0.0.1:8080/v1/chat/completions`. The
+the OpenAI-compatible endpoint at `127.0.0.1:4000/v1/chat/completions`. The
 Jarvis discovers the active model from the endpoint's `/v1/models` response. An
-explicit `JARVIS_QWEN_MODEL` may override discovery. Qwen can emit
+explicit `JARVIS_ON_DEVICE_MODEL` may override discovery. Qwen can emit
 OpenAI-compatible function calls; Jarvis executes each call through the local
 audited gateway, returns the result as a `tool` message, and allows at most four
 tool rounds before producing the final answer.
@@ -149,7 +149,7 @@ Skill `allowed-tools` metadata constrains the tools exposed to the local model.
 Before disconnecting the network, verify the local model is ready:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/v1/models
+curl -fsS http://127.0.0.1:4000/v1/models
 ```
 
 Local Qwen, the gateway, Markdown memory, the local knowledge index, and the
