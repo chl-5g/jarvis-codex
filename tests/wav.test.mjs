@@ -6,7 +6,7 @@ const frontend = await readFile(new URL("../src/main.ts", import.meta.url), "utf
 const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
-const qwenBackend = await readFile(new URL("../src-tauri/src/qwen.rs", import.meta.url), "utf8");
+const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
@@ -279,7 +279,7 @@ test("Codex, Qwen, tools, workflows, and tasks publish one local event envelope"
 
 test("Jarvis exposes hybrid, local Qwen, and Codex model routes", () => {
   assert.match(frontend, /jarvis\.modelMode/);
-  assert.match(frontend, /本地 Qwen/);
+  assert.match(frontend, /端侧模型/);
   assert.match(frontend, /混合模式/);
   assert.match(frontend, /Codex 原生/);
 });

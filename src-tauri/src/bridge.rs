@@ -430,7 +430,8 @@ fn start_command(runtime: BridgeRuntime, command: CommandRequest) -> String {
         json!({"kind":"bridge","phase":"started","requestId":started_id,"text":command.text}),
     );
     tauri::async_runtime::spawn(async move {
-        let result = crate::qwen::chat(runtime.app, command.text, runtime.workspace).await;
+        let result =
+            crate::on_device_model::chat(runtime.app, command.text, runtime.workspace).await;
         match result {
             Ok(answer) => publish(
                 "bridge",

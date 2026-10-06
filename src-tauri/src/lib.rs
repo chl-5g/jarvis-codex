@@ -25,7 +25,7 @@ mod knowledge;
 mod logging;
 mod memory;
 mod offline_speech;
-mod qwen;
+mod on_device_model;
 mod skills;
 mod tasks;
 mod tools;
@@ -1313,7 +1313,27 @@ async fn local_qwen_chat(
         .transpose()?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(default_workspace().unwrap_or_else(|_| ".".to_owned())));
-    qwen::chat(app, text, workspace).await
+    on_device_model::chat(app, text, workspace).await
+}
+
+#[tauri::command]
+async fn on_device_model_status() -> Result<String, String> {
+    match on_device_model::detect_model().await {
+        Ok(model) => {
+            logging::text(
+                "jarvis-runtime",
+                &format!("on-device model detected: {model}"),
+            );
+            Ok(model)
+        }
+        Err(error) => {
+            logging::text(
+                "jarvis-runtime",
+                &format!("on-device model detection failed: {error}"),
+            );
+            Err(error)
+        }
+    }
 }
 
 async fn stop_speech(state: &AppState) {
@@ -1531,6 +1551,7 @@ pub fn run() {
             task_resume,
             task_run_due,
             local_qwen_chat,
+            on_device_model_status,
             speak_text,
             stop_all,
             resolve_server_request,

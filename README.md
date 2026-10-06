@@ -117,7 +117,8 @@ removed.
 
 Jarvis includes a fully local text path. Select `Local Qwen` in Settings to use
 the OpenAI-compatible endpoint at `127.0.0.1:8080/v1/chat/completions`. The
-default model is `/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit`. Qwen can emit
+Jarvis discovers the active model from the endpoint's `/v1/models` response. An
+explicit `JARVIS_QWEN_MODEL` may override discovery. Qwen can emit
 OpenAI-compatible function calls; Jarvis executes each call through the local
 audited gateway, returns the result as a `tool` message, and allows at most four
 tool rounds before producing the final answer.

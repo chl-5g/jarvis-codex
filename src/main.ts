@@ -81,8 +81,8 @@ const permissionLabels: Record<PermissionMode, string> = {
   full: "完全访问 · 高风险",
 };
 const modelModeLabels: Record<ModelMode, string> = {
-  hybrid: "混合模式 · Voice 优先，本地 Qwen 兜底",
-  qwen: "本地 Qwen · 8080",
+  hybrid: "混合模式 · Voice 优先，端侧模型兜底",
+  qwen: "端侧模型 · 8080",
   codex: "Codex 原生 · 工作线程",
 };
 function storedPermissionMode(): PermissionMode {
@@ -201,7 +201,7 @@ document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   </footer>
   <div id="degraded-banner" class="degraded-banner" hidden><b>JARVIS NEEDS PERMISSION</b><span id="degraded-copy">首次使用请允许麦克风和语音识别。</span></div>
   <dialog id="approval"><h2>高风险操作确认</h2><p id="approval-copy">Codex 请求执行需要确认的动作。</p><div><button id="deny">拒绝</button><button id="approve">允许一次</button></div></dialog>
-  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>混合模式</b><small>Voice 在线时用 Codex，文字任务优先本地 Qwen</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>本地 Qwen</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>模型路由修改立即保存；混合模式在语音关闭时自动使用本地 Qwen。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
+  <dialog id="settings-dialog"><h2>JARVIS SYSTEM</h2><dl><dt>Wake phrase</dt><dd>嗨 Jarvis / Hey Jarvis</dd><dt>Wake listener</dt><dd id="wake-auth">检测中</dd><dt>Computer Use</dt><dd id="speaker-auth">已开放：完全访问</dd><dt>Codex thread</dt><dd id="thread-id">—</dd><dt>Workspace</dt><dd id="workspace">—</dd><dt>Permission</dt><dd id="permission-mode-label">—</dd><dt>Model route</dt><dd id="model-mode-label">—</dd><dt>Voice kernel</dt><dd id="voice-auth">检测中</dd></dl><label class="workspace-setting">工作目录<input id="workspace-setting" autocomplete="off" spellcheck="false"></label><fieldset class="permission-setting"><legend>Codex 操作权限</legend><label><input type="radio" name="permission-mode" value="safe"><span><b>安全模式</b><small>超出当前目录或高风险操作时询问</small></span></label><label class="recommended"><input type="radio" name="permission-mode" value="auto"><span><b>自动办公</b><small>当前目录内自主执行，越界操作直接阻止</small></span><em>推荐</em></label><label class="danger"><input type="radio" name="permission-mode" value="full"><span><b>完全访问</b><small>不限制目录且不询问，请谨慎使用</small></span></label></fieldset><fieldset class="permission-setting model-setting"><legend>模型路由</legend><label class="recommended"><input type="radio" name="model-mode" value="hybrid"><span><b>混合模式</b><small>Voice 在线时用 Codex，文字任务优先端侧模型</small></span><em>推荐</em></label><label><input type="radio" name="model-mode" value="qwen"><span><b>端侧模型</b><small>所有文字任务走本机 8080 推理服务</small></span></label><label><input type="radio" name="model-mode" value="codex"><span><b>Codex 原生</b><small>文字任务接入 Codex 工作线程</small></span></label></fieldset><fieldset class="permission-setting bridge-setting"><legend>iPhone / Shortcuts 本地桥</legend><label>监听地址<input id="bridge-bind" value="127.0.0.1" autocomplete="off" spellcheck="false"></label><p id="bridge-status">本地桥已关闭</p><p id="bridge-endpoint">默认只监听本机；改为私有局域网地址后，快捷指令可 POST /command。</p><p id="bridge-token" hidden></p><div class="settings-actions"><button id="bridge-enable" type="button">启用本地桥</button><button id="bridge-disable" type="button">关闭本地桥</button></div></fieldset><p>权限切换会停止当前任务并重建 Codex 运行时，但会继续使用当前工作目录保存的 thread。</p><p>修改工作目录后，下次重启 Jarvis 生效。每个工作目录会续接自己的 Codex thread。</p><p>模型路由修改立即保存；混合模式在语音关闭时自动使用端侧模型。</p><p>“新开线程”会结束当前任务并创建一个全新的 Codex thread；原线程仍保留在 Codex 历史记录中。</p><p>唤醒词在本机识别；Jarvis 页面通过 Codex app-server V3 WebRTC 进入官方 Voice 线程。认证复用本机 Codex 登录，不读取凭据、不模拟点击，也不建立第二套 GPT-Live。</p><div class="settings-actions"><button id="new-thread" class="new-thread">＋ 新开线程</button><span></span><button id="save-settings">保存</button><button id="close-settings">关闭</button></div></dialog>
 </main>`;
 
 const $ = <T extends Element>(selector: string) => document.querySelector<T>(selector)!;
@@ -1078,7 +1078,7 @@ if (currentWindow) {
   });
   await listen<QwenEvent>("qwen-event", ({ payload }) => {
     if (payload.error) {
-      appendStreamLine(`本地 Qwen：${payload.error}`, "error", "qwen-assistant");
+      appendStreamLine(`端侧模型：${payload.error}`, "error", "qwen-assistant");
       response.textContent = payload.error;
       setMode("degraded");
       return;
@@ -1200,11 +1200,11 @@ $("#command-form").addEventListener("submit", async (event) => {
   if (useLocalQwen) {
     qwenAnswerBuffer = "";
     setMode("working");
-    appendStreamLine("本地 Qwen 开始处理", "task");
+    appendStreamLine("端侧模型开始处理", "task");
     try {
       const answer = await invoke<string>("local_qwen_chat", { text, workspace });
       const finalAnswer = answer.trim() || qwenAnswerBuffer.trim();
-      if (!finalAnswer) throw new Error("本地 Qwen 没有返回最终答案");
+      if (!finalAnswer) throw new Error("端侧模型没有返回最终答案");
       response.textContent = finalAnswer;
       appendStreamLine(finalAnswer, "assistant", "qwen-assistant");
       sealStreamLine("qwen-assistant");
@@ -1219,14 +1219,14 @@ $("#command-form").addEventListener("submit", async (event) => {
     } catch (error) {
       qwenAnswerBuffer = "";
       if (modelMode === "qwen") {
-        const message = `本地 Qwen 不可用：${String(error)}`;
+        const message = `端侧模型不可用：${String(error)}`;
         response.textContent = message;
         appendStreamLine(message, "error");
         setMode("degraded");
         return;
       }
-      response.textContent = "本地 Qwen 尚未连接，改用 Codex 原生任务。";
-      appendStreamLine("本地 Qwen 不可用，切换 Codex", "system");
+      response.textContent = "端侧模型尚未连接，改用 Codex 原生任务。";
+      appendStreamLine("端侧模型不可用，切换 Codex", "system");
     }
   }
   // Typed commands use the normal Codex turn path. Realtime Voice is an audio
@@ -1461,6 +1461,14 @@ if (currentWindow) {
     updateSpeakerAccess(state.speakerAccess);
     setWorker("orchestrator", "Wake word starting");
     setMode("ready");
+    try {
+      const model = await invoke<string>("on_device_model_status");
+      appendStreamLine(`端侧模型已连接：${model}`, "system");
+      setWorker("orchestrator", "On-device model ready");
+    } catch (error) {
+      appendStreamLine(`端侧模型未连接：${String(error)}`, "error");
+      setWorker("orchestrator", "On-device model offline", false);
+    }
     const backgroundStart = await invoke<boolean>("startup_is_background");
     if (!backgroundStart) {
       const microphoneAuthorization = await invoke<string>("request_microphone_permission");

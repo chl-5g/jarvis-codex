@@ -106,8 +106,8 @@ Voice 暂时不可用时，可以使用底部文字输入框。语音和文字�
 ## 断网运行：本地 Qwen 与 Agent 工具层
 
 Jarvis 现在有一条完全本地的文字任务路径。设置中的“本地 Qwen”会请求本机
-`127.0.0.1:8080/v1/chat/completions`，默认模型是
-`/Users/caihaolun/models/Qwen3.8-27B-MLX-4bit`。模型可以通过 OpenAI 兼容的
+`127.0.0.1:8080/v1/chat/completions`，Jarvis 会从 `/v1/models` 自动发现当前模型，
+也可以用 `JARVIS_QWEN_MODEL` 显式覆盖。模型可以通过 OpenAI 兼容的
 `tools` 字段调用 Agent 工具；Jarvis 执行工具后把结果作为 `tool` 消息回传给模型，
 最多进行四轮工具调用，最终答案才会显示和播报。
 
