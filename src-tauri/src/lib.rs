@@ -105,6 +105,92 @@ fn agent_remove(state: State<'_, AppState>, public_key: String) -> Result<(), St
 }
 
 #[tauri::command]
+async fn agent_task_receive(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    envelope: agent_protocol::AgentEnvelope,
+) -> Result<agent_tasks::RemoteTask, String> {
+    agent_protocol::validate_inbound(&envelope, agent_protocol::now())?;
+    if envelope.kind != agent_protocol::AgentMessageKind::TaskRequest {
+        return Err("expected task_request".into());
+    }
+    if !state.agent_registry.authorize(
+        &envelope.from,
+        envelope
+            .payload
+            .get("capability")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    ) {
+        return Err("peer or capability is not authorized".into());
+    }
+    if !state.agent_tasks.accept_once(&envelope.message_id)? {
+        return Err("duplicate agent message".into());
+    }
+    let request: agent_protocol::TaskRequestPayload =
+        serde_json::from_value(envelope.payload.clone()).map_err(|e| e.to_string())?;
+    let id = envelope.task_id.clone().ok_or("missing task id")?;
+    let initial = if request.requires_approval {
+        agent_tasks::RemoteTaskStatus::AwaitingApproval
+    } else {
+        agent_tasks::RemoteTaskStatus::Running
+    };
+    let task = agent_tasks::RemoteTask {
+        id: id.clone(),
+        message_id: envelope.message_id.clone(),
+        peer: envelope.from.clone(),
+        capability: request.capability.clone(),
+        input: request.input.clone(),
+        status: initial.clone(),
+        expires_at: envelope.expires_at,
+        requires_approval: request.requires_approval,
+    };
+    state.agent_tasks.create(task.clone())?;
+    if request.requires_approval {
+        crate::events::emit(
+            &app,
+            "agent",
+            serde_json::json!({"kind":"agent-task","phase":"approval","taskId":id}),
+        );
+        return Ok(task);
+    }
+    let workspace = PathBuf::from(default_workspace()?);
+    let result = tools::execute(
+        app.clone(),
+        &workspace,
+        &request.capability,
+        request.input,
+        false,
+    )
+    .await;
+    let status = if result.success {
+        agent_protocol::TaskResultStatus::Completed
+    } else {
+        agent_protocol::TaskResultStatus::Failed
+    };
+    let next = if result.success {
+        agent_tasks::RemoteTaskStatus::Completed
+    } else {
+        agent_tasks::RemoteTaskStatus::Failed
+    };
+    let _ = state.agent_tasks.transition(&id, next);
+    let reply = agent_protocol::task_result(
+        "local",
+        &envelope.from,
+        &id,
+        status,
+        result.success.then_some(Value::String(result.output)),
+        result.error,
+        envelope.expires_at,
+    );
+    state
+        .cipherpipe
+        .send_envelope(&app, &reply, Some(&envelope.from))
+        .await?;
+    Ok(task)
+}
+
+#[tauri::command]
 fn agent_task_list(state: State<'_, AppState>) -> Vec<agent_tasks::RemoteTask> {
     state.agent_tasks.list()
 }
@@ -2188,6 +2274,7 @@ pub fn run() {
             agent_remove,
             agent_task_list,
             agent_task_send,
+            agent_task_receive,
             memory_status,
             prepare_wake_context,
             memory_recall,

@@ -102,6 +102,33 @@ pub fn validate_inbound(value: &AgentEnvelope, current: u64) -> Result<(), Strin
     Ok(())
 }
 
+pub fn task_result(
+    from: &str,
+    to: &str,
+    task_id: &str,
+    status: TaskResultStatus,
+    output: Option<Value>,
+    error: Option<String>,
+    expires_at: u64,
+) -> AgentEnvelope {
+    AgentEnvelope {
+        version: VERSION,
+        message_id: new_id("msg"),
+        kind: AgentMessageKind::TaskResult,
+        task_id: Some(task_id.into()),
+        from: from.into(),
+        to: to.into(),
+        created_at: now(),
+        expires_at,
+        payload: serde_json::to_value(TaskResultPayload {
+            status,
+            output,
+            error,
+        })
+        .unwrap_or(Value::Null),
+    }
+}
+
 pub fn task_request(
     from: &str,
     to: &str,
