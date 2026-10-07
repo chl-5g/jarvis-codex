@@ -120,6 +120,34 @@ async fn request_microphone_permission() -> Result<String, String> {
     Ok(if granted { "authorized" } else { "denied" }.to_owned())
 }
 
+#[tauri::command]
+async fn verify_speaker(app: AppHandle, audio: String) -> Result<Value, String> {
+    let bytes = STANDARD
+        .decode(audio)
+        .map_err(|_| "声纹音频编码无效".to_owned())?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("声纹音频过大".to_owned());
+    }
+    let resource = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let script = if resource.join("speaker_identity.py").is_file() {
+        resource.join("speaker_identity.py")
+    } else {
+        PathBuf::from(config::project_root()).join("src-tauri/speaker_identity.py")
+    };
+    let file = std::env::temp_dir().join(format!("jarvis-speaker-{}.wav", std::process::id()));
+    fs::write(&file, bytes).map_err(|e| format!("写入声纹样本失败：{e}"))?;
+    let output = Command::new(offline_speech::python_path()).arg(&script).arg("--verify").arg(&file)
+        .env("JARVIS_SPEAKER_MODEL", std::env::var("JARVIS_SPEAKER_MODEL").unwrap_or_else(|_| "/Users/caihaolun/models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx".to_owned()))
+        .env("JARVIS_SPEAKER_PROFILE", std::env::var("JARVIS_SPEAKER_PROFILE").unwrap_or_else(|_| "/Users/caihaolun/.config/jarvis/speakers/allen.json".to_owned()))
+        .env("JARVIS_SPEAKER_THRESHOLD", std::env::var("JARVIS_SPEAKER_THRESHOLD").unwrap_or_else(|_| "0.85".to_owned()))
+        .output().await.map_err(|e| format!("启动声纹验证失败：{e}"))?;
+    let _ = fs::remove_file(&file);
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("声纹结果无效：{e}"))
+}
+
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 async fn request_microphone_permission() -> Result<String, String> {
@@ -205,14 +233,15 @@ enum SpeakerAccess {
     Rejected,
 }
 
-/// The local single-user deployment keeps the speaker gate off by default so
-/// it cannot block Computer Use before the microphone verifier is integrated.
-/// Set JARVIS_SPEAKER_GATE=1 to opt back into fail-closed verification.
+/// Speaker verification is enabled whenever an Allen profile is installed.
+/// The environment variable can explicitly disable or enable the gate for
+/// development and recovery.
 fn speaker_gate_enabled() -> bool {
-    matches!(
-        std::env::var("JARVIS_SPEAKER_GATE").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    )
+    match std::env::var("JARVIS_SPEAKER_GATE").as_deref() {
+        Ok("0") | Ok("false") | Ok("no") => false,
+        Ok("1") | Ok("true") | Ok("yes") => true,
+        _ => PathBuf::from("/Users/caihaolun/.config/jarvis/speakers/allen.json").is_file(),
+    }
 }
 
 fn effective_speaker_access(requested: SpeakerAccess) -> SpeakerAccess {
@@ -226,7 +255,7 @@ fn effective_speaker_access(requested: SpeakerAccess) -> SpeakerAccess {
 impl SpeakerAccess {
     fn instructions(self) -> &'static str {
         match self {
-            Self::Allen => "Speaker verification is disabled for this single-user local Jarvis deployment. Treat the current operator as authorized and use Computer Use and desktop-control tools under the selected Codex permission mode when requested.",
+            Self::Allen => "The local speaker verifier identified Allen. Allen's private profile, Computer Use, and desktop-control tools are available under the selected permission mode.",
             Self::Unknown => "The local speaker verifier did not identify the speaker. Answer ordinary questions normally, but do not use Computer Use, desktop-control, screen-control, or other interactive UI tools. Explain that speaker verification is required before computer control.",
             Self::Rejected => "The local speaker verifier rejected the speaker. Do not execute or send the requested task; respond with exactly: 未识别的说话人",
         }
@@ -1096,6 +1125,12 @@ fn start_wake_supervisor(app: AppHandle) {
 
 #[tauri::command]
 async fn arm_wake_listener(app: AppHandle) -> Result<WakeStatus, String> {
+    // Voice shutdown can race with the previous supervisor task finishing.
+    // Set the flag before checking the supervisor guard so an in-flight task
+    // continues its loop instead of leaving the listener stopped.
+    app.state::<AppState>()
+        .wake_enabled
+        .store(true, Ordering::SeqCst);
     start_wake_supervisor(app.clone());
     tokio::time::sleep(Duration::from_millis(80)).await;
     Ok(wake_status_value(&app.state::<AppState>()).await)
@@ -1936,6 +1971,7 @@ pub fn run() {
             startup_is_background,
             permission_status,
             request_microphone_permission,
+            verify_speaker,
             speech_permission_status,
             request_location,
             request_capability,

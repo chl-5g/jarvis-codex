@@ -52,6 +52,7 @@
       "codex": "codex",
       "local_tts.py": "local_tts.py",
       "speech_worker.py": "speech_worker.py",
+      "speaker_identity.py": "speaker_identity.py",
       "cipherpipe_bridge.py": "cipherpipe_bridge.py"
     },
     "macOS": {

@@ -16,10 +16,10 @@
     "make_searchable_pdf": "Create a searchable OCR text layer in a copy of a PDF through the pdfspine connector.",
     "request_capability": "Open the macOS privacy settings page for a capability that needs user authorization.",
     "memory_recall": "Search the user's private Jarvis memory for relevant facts, preferences, project context, or procedures.",
-    "memory_save_core": "Create or replace one bounded durable fact, preference, project fact, or reference in the user's private memory. Use only when the user explicitly asks to remember or update it.",
-    "memory_save_episode": "Save a bounded summary of a completed conversation or event in the user's private memory.",
-    "memory_working_append": "Append a bounded note to the current working memory. Use for an explicit user instruction to retain short-term context.",
+    "memory_save_core": "Create or replace one bounded durable fact, preference, project fact, or reference in the user's private memory. Use your judgment for stable, clearly stated, or repeatedly confirmed information; do not save guesses or sensitive inferences. Recall and compare before replacing an existing fact.",
+    "memory_save_episode": "Save a bounded summary of a meaningful completed conversation or event when it will improve future continuity. Do not save routine small talk.",
+    "memory_working_append": "Append a bounded note to working memory when current task context should survive the next turn. Use your judgment; do not append every message.",
     "memory_search_procedures": "Search the user's saved reusable procedures and workflows.",
-    "memory_save_procedure": "Create or replace a reusable procedure in the user's private memory when the user explicitly asks Jarvis to remember a workflow."
+    "memory_save_procedure": "Create or replace a reusable procedure in the user's private memory when a workflow is stable and clearly established. Ask before deleting or replacing a conflicting procedure."
   }
 }

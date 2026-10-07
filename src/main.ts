@@ -54,7 +54,7 @@ type JarvisEvent = {
   operation?: string;
   success?: boolean;
 };
-const SPEAKER_GATE_ENABLED = false;
+const SPEAKER_GATE_ENABLED = true;
 const VOICE_MUTED_KEY = "jarvis.voiceMuted:v1";
 const BRIDGE_TOKEN_KEY = "jarvis.bridgeToken:v1";
 
@@ -69,7 +69,7 @@ const state = {
   muted: storedVoiceMuted(),
   // This is a single-user local deployment. Keep Computer Use available
   // without waiting for the optional voiceprint verifier.
-  speakerAccess: "allen" as SpeakerAccess,
+  speakerAccess: "unknown" as SpeakerAccess,
 };
 
 const WORKSPACE_KEY = "jarvis.workspace";
@@ -128,6 +128,8 @@ let voiceStartInFlight = false;
 let recoverableColdStartError = false;
 let voiceIdleSleepTimer: number | null = null;
 let voiceIdleSleepInFlight = false;
+let wakeArmInFlight: Promise<void> | null = null;
+let speakerVerified = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -952,6 +954,49 @@ async function acquireMicrophone(coldStart: boolean) {
   throw new Error("麦克风初始化失败");
 }
 
+function encodeWav(samples: Float32Array, sampleRate: number): string {
+  const bytes = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(bytes);
+  const put = (offset: number, value: string) => [...value].forEach((char, index) => view.setUint8(offset + index, char.charCodeAt(0)));
+  put(0, "RIFF"); view.setUint32(4, 36 + samples.length * 2, true); put(8, "WAVE"); put(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  put(36, "data"); view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, index) => view.setInt16(44 + index * 2, Math.max(-1, Math.min(1, sample)) * 32767, true));
+  let binary = ""; const chunk = 0x8000; const raw = new Uint8Array(bytes);
+  for (let index = 0; index < raw.length; index += chunk) binary += String.fromCharCode(...raw.subarray(index, index + chunk));
+  return btoa(binary);
+}
+
+async function verifySpeakerOnce(stream: MediaStream) {
+  if (!SPEAKER_GATE_ENABLED || speakerVerified) return;
+  const context = new AudioContext({ sampleRate: 16000 });
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const muted = context.createGain(); muted.gain.value = 0;
+  const chunks: Float32Array[] = [];
+  processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+  source.connect(processor); processor.connect(muted); muted.connect(context.destination);
+  response.textContent = "正在验证说话者…";
+  await sleep(2500);
+  processor.disconnect(); source.disconnect(); muted.disconnect(); await context.close();
+  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const samples = new Float32Array(length); let offset = 0;
+  for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length; }
+  try {
+    const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encodeWav(samples, 16000) });
+    state.speakerAccess = result.verified ? "allen" : "unknown";
+    speakerVerified = result.verified;
+    updateSpeakerAccess(state.speakerAccess);
+    appendStreamLine(result.verified ? "已验证：Allen" : "未识别说话者：普通会话", result.verified ? "system" : "error");
+  } catch (error) {
+    state.speakerAccess = "unknown";
+    speakerVerified = false;
+    updateSpeakerAccess(state.speakerAccess);
+    appendStreamLine(`声纹验证不可用：${String(error)}`, "error");
+  }
+}
+
 async function ensureWorkspace() {
   const usable = (value: string | undefined): value is string => Boolean(
     value && value !== "/" && !value.includes("/outputs/Jarvis/"),
@@ -1006,6 +1051,7 @@ async function startDirectVoice({ coldStart = false } = {}) {
       await sleep(900);
     }
     microphoneStream = await acquireMicrophone(coldStart);
+    await verifySpeakerOnce(microphoneStream);
     attachAnalyser(microphoneStream, "microphone");
 
     const connection = new RTCPeerConnection();
@@ -1087,6 +1133,9 @@ async function stopDirectVoice() {
     updateVoiceInfo(info);
   } finally {
     cleanupPeer();
+    speakerVerified = false;
+    state.speakerAccess = "unknown";
+    updateSpeakerAccess(state.speakerAccess);
   }
 }
 
@@ -1097,6 +1146,14 @@ function setVoiceMuted(muted: boolean) {
   if (track) track.enabled = !muted;
   if (state.directVoice) updateVoiceInfo(state.directVoice);
   appendStreamLine(muted ? "麦克风已静音" : "麦克风已取消静音", "system");
+  // The button remains a mute toggle only.  When Voice is idle, make sure a
+  // listener that raced with Voice shutdown is armed again; this never opens
+  // a Voice session or changes the mute state.
+  if (!muted && !state.directVoice?.voiceActive && !peer) {
+    void armWakeListener().catch((error) => {
+      appendStreamLine(`唤醒监听恢复失败：${String(error)}`, "error");
+    });
+  }
 }
 
 if (currentWindow) {
@@ -1587,15 +1644,21 @@ if (currentWindow) {
 }
 
 async function armWakeListener() {
-  try {
-    state.wake = await invoke<WakeStatus>("arm_wake_listener");
-    $("#wake-auth").textContent = state.wake.ready ? "Local listener ready" : state.wake.authorization;
-    if (["denied", "restricted"].includes(state.wake.authorization)) {
-      setMode("degraded");
-      banner.hidden = false;
-      $("#degraded-copy").textContent = "请在系统设置 → 隐私与安全性中允许麦克风和语音识别。";
+  if (wakeArmInFlight) return wakeArmInFlight;
+  wakeArmInFlight = (async () => {
+    try {
+      state.wake = await invoke<WakeStatus>("arm_wake_listener");
+      $("#wake-auth").textContent = state.wake.ready ? "Local listener ready" : state.wake.authorization;
+      if (["denied", "restricted"].includes(state.wake.authorization)) {
+        setMode("degraded");
+        banner.hidden = false;
+        $("#degraded-copy").textContent = "请在系统设置 → 隐私与安全性中允许麦克风和语音识别。";
+      }
+    } catch (error) {
+      $("#wake-auth").textContent = String(error);
     }
-  } catch (error) {
-    $("#wake-auth").textContent = String(error);
-  }
+  })().finally(() => {
+    wakeArmInFlight = null;
+  });
+  return wakeArmInFlight;
 }

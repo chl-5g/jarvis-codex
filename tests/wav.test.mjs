@@ -300,17 +300,17 @@ test("permission profiles are persisted and mapped by the trusted backend", () =
   assert.match(backend, /existing\.permission_mode == permission_mode/);
 });
 
-test("speaker verification is opt-in and Computer Use is open by default", () => {
+test("speaker verification gates Computer Use and preserves ordinary chat", () => {
   assert.match(frontend, /type SpeakerAccess = "unknown" \| "allen" \| "rejected"/);
-  assert.match(frontend, /const SPEAKER_GATE_ENABLED = false/);
-  assert.match(frontend, /speakerAccess: "allen"/);
+  assert.match(frontend, /const SPEAKER_GATE_ENABLED = true/);
+  assert.match(frontend, /speakerAccess: "unknown"/);
   assert.match(frontend, /speakerAccess: state\.speakerAccess/);
   assert.match(frontend, /已开放：完全访问/);
   assert.match(backend, /enum SpeakerAccess/);
   assert.match(backend, /SpeakerAccess::Unknown/);
   assert.match(backend, /SpeakerAccess::Allen/);
   assert.match(backend, /SpeakerAccess::Rejected/);
-  assert.match(backend, /use Computer Use and desktop-control tools/);
+  assert.match(backend, /Computer Use.*desktop-control tools/);
   assert.match(backend, /fn speaker_gate_enabled/);
   assert.match(backend, /JARVIS_SPEAKER_GATE/);
   assert.match(backend, /effective_speaker_access/);
