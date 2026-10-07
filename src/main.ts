@@ -50,6 +50,9 @@ type JarvisEvent = {
   message?: string;
   output?: string;
   error?: string;
+  connector?: string;
+  operation?: string;
+  success?: boolean;
 };
 const SPEAKER_GATE_ENABLED = false;
 const VOICE_MUTED_KEY = "jarvis.voiceMuted:v1";
@@ -1109,6 +1112,14 @@ if (currentWindow) {
       const label = payload.kind === "workflow" ? "工作流" : "任务";
       const kind = phase === "error" || phase === "approval-required" ? "error" : "task";
       appendStreamLine(`${label}${phase}：${detail}`, kind, `${payload.kind}-${id}`);
+      return;
+    }
+    if (payload.kind === "connector" && payload.connector === "pdfspine") {
+      const operation = payload.operation ?? "OCR";
+      const label = payload.success === false ? "失败" : "完成";
+      const kind = payload.success === false ? "error" : "tool";
+      appendStreamLine(`pdfspine ${operation}：${label}`, kind, `pdfspine-${operation}`);
+      if (payload.success === false) setWorker("developer", "OCR error", false);
       return;
     }
     if (payload.kind !== "tool") return;

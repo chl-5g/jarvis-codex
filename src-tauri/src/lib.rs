@@ -861,6 +861,12 @@ pub(crate) async fn request_pdfspine(
 }
 
 #[tauri::command]
+async fn cancel_pdfspine(state: State<'_, AppState>) -> Result<(), String> {
+    state.pdfspine.shutdown().await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn request_location(app: AppHandle) -> Result<String, String> {
     request_current_location(app).await
 }
@@ -1955,6 +1961,7 @@ pub fn run() {
             knowledge_search,
             tool_list,
             tool_execute,
+            cancel_pdfspine,
             bridge_status,
             bridge_enable,
             bridge_disable,

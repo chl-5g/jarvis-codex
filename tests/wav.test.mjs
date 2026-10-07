@@ -13,6 +13,8 @@ const voiceConfig = await readFile(new URL("../config/voice.json", import.meta.u
 const toolsConfig = await readFile(new URL("../config/tools.json", import.meta.url), "utf8");
 const eventsBackend = await readFile(new URL("../src-tauri/src/events.rs", import.meta.url), "utf8");
 const toolsBackend = await readFile(new URL("../src-tauri/src/tools.rs", import.meta.url), "utf8");
+const pdfspineBackend = await readFile(new URL("../src-tauri/src/pdfspine.rs", import.meta.url), "utf8");
+const connectorsConfig = await readFile(new URL("../config/connectors.json", import.meta.url), "utf8");
 const knowledgeBackend = await readFile(new URL("../src-tauri/src/knowledge.rs", import.meta.url), "utf8");
 const workflowBackend = await readFile(new URL("../src-tauri/src/workflow.rs", import.meta.url), "utf8");
 const tasksBackend = await readFile(new URL("../src-tauri/src/tasks.rs", import.meta.url), "utf8");
@@ -135,6 +137,16 @@ test("Voice sleeps after configured inactivity and waits for wake", () => {
 test("tool descriptions are kept outside prompt policy", () => {
   assert.match(toolsConfig, /"descriptions"/);
   assert.doesNotMatch(promptsConfig, /"toolDescriptions"/);
+});
+
+test("pdfspine OCR is a discoverable connector with visible lifecycle events", () => {
+  assert.match(toolsConfig, /"ocr_image"/);
+  assert.match(toolsConfig, /"ocr_pdf"/);
+  assert.match(toolsConfig, /"make_searchable_pdf"/);
+  assert.match(connectorsConfig, /"pdfspine"/);
+  assert.match(pdfspineBackend, /JARVIS_PDFSPINE_BIN/);
+  assert.match(pdfspineBackend, /events::emit/);
+  assert.match(frontend, /payload\.kind === "connector"/);
 });
 
 test("Voice degradation copy is configuration-driven", () => {

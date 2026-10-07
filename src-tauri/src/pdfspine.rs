@@ -34,9 +34,25 @@ impl PdfSpine {
         })
     }
 
-    async fn start(&self) -> Result<(), String> {
-        let binary = std::env::var_os("JARVIS_PDFSPINE_BIN")
-            .ok_or_else(|| "pdfspine OCR 未配置：请设置 JARVIS_PDFSPINE_BIN".to_owned())?;
+    async fn start(&self, app: &AppHandle) -> Result<(), String> {
+        let mut candidates = Vec::new();
+        if let Some(configured) = std::env::var_os("JARVIS_PDFSPINE_BIN") {
+            candidates.push(PathBuf::from(configured));
+        }
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            candidates.push(resource_dir.join("pdf-ocr-worker"));
+            candidates.push(resource_dir.join("bin/pdf-ocr-worker"));
+        }
+        let project_root = PathBuf::from(crate::config::project_root());
+        candidates.push(project_root.join("../pdfspine/target/release/pdf-ocr-worker"));
+        candidates.push(project_root.join("../pdfspine/target/debug/pdf-ocr-worker"));
+        let binary = candidates
+            .into_iter()
+            .find(|candidate| candidate.is_file())
+            .ok_or_else(|| {
+                "pdfspine OCR worker 不可用：请设置 JARVIS_PDFSPINE_BIN 或构建 pdf-ocr-worker"
+                    .to_owned()
+            })?;
         let mut child = Command::new(binary)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -61,11 +77,11 @@ impl PdfSpine {
         }
     }
 
-    pub async fn request(&self, op: &str, params: Value) -> Result<Value, String> {
+    pub async fn request(&self, app: &AppHandle, op: &str, params: Value) -> Result<Value, String> {
         let mut guard = self.worker.lock().await;
         if guard.is_none() {
             drop(guard);
-            self.start().await?;
+            self.start(app).await?;
             guard = self.worker.lock().await;
         }
         let worker = guard.as_mut().ok_or("pdfspine worker 未启动")?;
@@ -183,7 +199,7 @@ pub async fn request(
         }
     }
     let connector = app.state::<crate::AppState>().pdfspine.clone();
-    let result = connector.request(op, params).await;
+    let result = connector.request(app, op, params).await;
     crate::events::emit(
         app,
         "connector",

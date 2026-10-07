@@ -59,6 +59,11 @@ non-bypassable safety boundaries such as permissions, path scope, payload size,
 timeouts, process isolation, and audit logging; those are execution safeguards,
 not a substitute for model reasoning.
 
+Document OCR is provided by the optional Rust `pdfspine` worker. Jarvis checks
+`JARVIS_PDFSPINE_BIN` first, then the packaged resource and the sibling
+`~/pdfspine/target/{release,debug}` builds, so the connector also works from a
+development checkout without shell-specific environment inheritance.
+
 ## Personal Agent direction
 
 Jarvis is intended to be a personal agent execution layer rather than another
