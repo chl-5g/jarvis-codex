@@ -19,6 +19,7 @@ const PROVIDERS_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../config/providers.json"
 ));
+const AGENT_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/agent.json"));
 static CONFIG: OnceLock<Value> = OnceLock::new();
 static PERMISSIONS: OnceLock<Value> = OnceLock::new();
 static PATHS: OnceLock<Value> = OnceLock::new();
@@ -26,6 +27,7 @@ static PROJECT_ROOT: OnceLock<String> = OnceLock::new();
 static CONNECTORS: OnceLock<Value> = OnceLock::new();
 static TOOLS: OnceLock<Value> = OnceLock::new();
 static PROVIDERS: OnceLock<Value> = OnceLock::new();
+static AGENT: OnceLock<Value> = OnceLock::new();
 
 fn value() -> &'static Value {
     CONFIG.get_or_init(|| {
@@ -99,6 +101,27 @@ pub fn providers() -> Value {
                 .unwrap_or_else(|_| Value::Object(Default::default()))
         })
         .clone()
+}
+
+pub fn agent_enabled() -> bool {
+    std::env::var("JARVIS_AGENT_ENABLED")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+        .unwrap_or_else(|_| {
+            AGENT
+                .get_or_init(|| serde_json::from_str(AGENT_JSON).unwrap_or_default())
+                .get("enabledByDefault")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+}
+
+pub fn agent_message(key: &str) -> &'static str {
+    let value = AGENT.get_or_init(|| serde_json::from_str(AGENT_JSON).unwrap_or_default());
+    value
+        .get("messages")
+        .and_then(|messages| messages.get(key))
+        .and_then(Value::as_str)
+        .unwrap_or("agent.error")
 }
 
 pub fn prompt(key: &str) -> &'static str {

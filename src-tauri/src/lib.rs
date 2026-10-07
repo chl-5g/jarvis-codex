@@ -110,9 +110,12 @@ async fn agent_task_receive(
     state: State<'_, AppState>,
     envelope: agent_protocol::AgentEnvelope,
 ) -> Result<agent_tasks::RemoteTask, String> {
+    if !config::agent_enabled() {
+        return Err(config::agent_message("disabled").into());
+    }
     agent_protocol::validate_inbound(&envelope, agent_protocol::now())?;
     if envelope.kind != agent_protocol::AgentMessageKind::TaskRequest {
-        return Err("expected task_request".into());
+        return Err(config::agent_message("invalidKind").into());
     }
     if !state.agent_registry.authorize(
         &envelope.from,
@@ -122,10 +125,10 @@ async fn agent_task_receive(
             .and_then(Value::as_str)
             .unwrap_or(""),
     ) {
-        return Err("peer or capability is not authorized".into());
+        return Err(config::agent_message("unauthorized").into());
     }
     if !state.agent_tasks.accept_once(&envelope.message_id)? {
-        return Err("duplicate agent message".into());
+        return Err(config::agent_message("duplicate").into());
     }
     let request: agent_protocol::TaskRequestPayload =
         serde_json::from_value(envelope.payload.clone()).map_err(|e| e.to_string())?;
@@ -228,8 +231,11 @@ async fn agent_task_send(
     expires_at: u64,
     requires_approval: bool,
 ) -> Result<agent_tasks::RemoteTask, String> {
+    if !config::agent_enabled() {
+        return Err(config::agent_message("disabled").into());
+    }
     if !state.agent_registry.authorize(&peer, &capability) {
-        return Err("peer or capability is not authorized".into());
+        return Err(config::agent_message("unauthorized").into());
     }
     let envelope = agent_protocol::task_request(
         "local",

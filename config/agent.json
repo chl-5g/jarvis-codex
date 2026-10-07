@@ -1,0 +1,14 @@
+{
+  "enabledByDefault": false,
+  "messages": {
+    "disabled": "agent.feature.disabled",
+    "unsupportedVersion": "agent.protocol.unsupported_version",
+    "identityRequired": "agent.protocol.identity_required",
+    "expired": "agent.protocol.expired",
+    "tooLarge": "agent.protocol.too_large",
+    "taskIdRequired": "agent.protocol.task_id_required",
+    "unauthorized": "agent.task.unauthorized",
+    "duplicate": "agent.task.duplicate",
+    "invalidKind": "agent.task.invalid_kind"
+  }
+}

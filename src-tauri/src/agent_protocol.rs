@@ -128,20 +128,20 @@ fn uuidish() -> String {
 
 pub fn validate_inbound(value: &AgentEnvelope, current: u64) -> Result<(), String> {
     if value.version != VERSION {
-        return Err("unsupported agent protocol version".into());
+        return Err(crate::config::agent_message("unsupportedVersion").into());
     }
     if value.message_id.trim().is_empty()
         || value.from.trim().is_empty()
         || value.to.trim().is_empty()
     {
-        return Err("agent envelope identity is required".into());
+        return Err(crate::config::agent_message("identityRequired").into());
     }
     if value.expires_at < value.created_at || value.expires_at < current {
-        return Err("agent message expired".into());
+        return Err(crate::config::agent_message("expired").into());
     }
     let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
     if bytes.len() > MAX_BYTES {
-        return Err("agent message too large".into());
+        return Err(crate::config::agent_message("tooLarge").into());
     }
     if matches!(
         value.kind,
@@ -151,7 +151,7 @@ pub fn validate_inbound(value: &AgentEnvelope, current: u64) -> Result<(), Strin
             | AgentMessageKind::TaskCancel
     ) && value.task_id.as_deref().unwrap_or("").trim().is_empty()
     {
-        return Err("task_id is required".into());
+        return Err(crate::config::agent_message("taskIdRequired").into());
     }
     Ok(())
 }
