@@ -1,3 +1,4 @@
+use crate::agent_protocol::Artifact;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{fs, path::PathBuf};
@@ -24,6 +25,9 @@ pub struct RemoteTask {
     pub status: RemoteTaskStatus,
     pub expires_at: u64,
     pub requires_approval: bool,
+    pub context_id: Option<String>,
+    pub reference_task_ids: Vec<String>,
+    pub artifacts: Vec<Artifact>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct TaskFile {
@@ -166,6 +170,9 @@ mod tests {
             status: RemoteTaskStatus::Queued,
             expires_at: 9999999999,
             requires_approval: false,
+            context_id: None,
+            reference_task_ids: Vec::new(),
+            artifacts: Vec::new(),
         }
     }
     #[test]

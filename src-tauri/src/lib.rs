@@ -144,6 +144,9 @@ async fn agent_task_receive(
         status: initial.clone(),
         expires_at: envelope.expires_at,
         requires_approval: request.requires_approval,
+        context_id: envelope.context_id.clone(),
+        reference_task_ids: envelope.reference_task_ids.clone(),
+        artifacts: Vec::new(),
     };
     state.agent_tasks.create(task.clone())?;
     if request.requires_approval {
@@ -245,6 +248,9 @@ async fn agent_task_send(
         status: agent_tasks::RemoteTaskStatus::Queued,
         expires_at,
         requires_approval,
+        context_id: envelope.context_id.clone(),
+        reference_task_ids: envelope.reference_task_ids.clone(),
+        artifacts: Vec::new(),
     };
     state.agent_tasks.create(task.clone())?;
     state

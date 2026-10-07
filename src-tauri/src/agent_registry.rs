@@ -1,3 +1,4 @@
+use crate::agent_protocol::AgentCard;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
@@ -12,6 +13,7 @@ pub struct AgentRecord {
     pub trusted: bool,
     pub capabilities: Vec<String>,
     pub last_seen: Option<u64>,
+    pub card: Option<AgentCard>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct RegistryFile {
@@ -113,6 +115,7 @@ mod tests {
             trusted: true,
             capabilities: vec!["read_file".into()],
             last_seen: None,
+            card: None,
         })
         .unwrap();
         assert!(r.authorize("peer", "read_file"));
@@ -130,6 +133,7 @@ mod tests {
             trusted: true,
             capabilities: vec!["run_command".into()],
             last_seen: None,
+            card: None,
         };
         assert!(r.upsert(x).is_err());
     }

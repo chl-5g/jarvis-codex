@@ -5,6 +5,56 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const VERSION: u8 = 1;
 pub const MAX_BYTES: usize = 64 * 1024;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCard {
+    pub name: String,
+    pub description: String,
+    pub version: String,
+    pub capabilities: AgentCardCapabilities,
+    pub skills: Vec<AgentSkill>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCardCapabilities {
+    pub streaming: bool,
+    pub push_notifications: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub input_modes: Vec<String>,
+    pub output_modes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePart {
+    pub kind: String,
+    pub text: Option<String>,
+    pub data: Option<Value>,
+    pub uri: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessage {
+    pub role: String,
+    pub parts: Vec<MessagePart>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Artifact {
+    pub name: Option<String>,
+    pub parts: Vec<MessagePart>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentMessageKind {
@@ -33,6 +83,8 @@ pub struct AgentEnvelope {
     pub message_id: String,
     pub kind: AgentMessageKind,
     pub task_id: Option<String>,
+    pub context_id: Option<String>,
+    pub reference_task_ids: Vec<String>,
     pub from: String,
     pub to: String,
     pub created_at: u64,
@@ -46,6 +98,7 @@ pub struct TaskRequestPayload {
     pub capability: String,
     pub input: Value,
     pub requires_approval: bool,
+    pub message: Option<AgentMessage>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +108,7 @@ pub struct TaskResultPayload {
     pub status: TaskResultStatus,
     pub output: Option<Value>,
     pub error: Option<String>,
+    pub artifacts: Vec<Artifact>,
 }
 
 pub fn now() -> u64 {
@@ -116,6 +170,8 @@ pub fn task_result(
         message_id: new_id("msg"),
         kind: AgentMessageKind::TaskResult,
         task_id: Some(task_id.into()),
+        context_id: None,
+        reference_task_ids: Vec::new(),
         from: from.into(),
         to: to.into(),
         created_at: now(),
@@ -124,6 +180,7 @@ pub fn task_result(
             status,
             output,
             error,
+            artifacts: Vec::new(),
         })
         .unwrap_or(Value::Null),
     }
@@ -142,6 +199,8 @@ pub fn task_request(
         message_id: new_id("msg"),
         kind: AgentMessageKind::TaskRequest,
         task_id: Some(new_id("task")),
+        context_id: Some(new_id("context")),
+        reference_task_ids: Vec::new(),
         from: from.into(),
         to: to.into(),
         created_at: now(),
@@ -150,6 +209,7 @@ pub fn task_request(
             capability: capability.into(),
             input,
             requires_approval,
+            message: None,
         })
         .unwrap_or(Value::Null),
     }
