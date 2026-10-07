@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const frontend = await readFile(new URL("../src/main.ts", import.meta.url), "utf8");
+const frontend = await readFile(new URL("../src/app/bootstrap.ts", import.meta.url), "utf8");
 const style = await readFile(new URL("../src/style.css", import.meta.url), "utf8");
 const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");

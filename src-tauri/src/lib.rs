@@ -2055,6 +2055,13 @@ async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
     terminate_runtime(&state).await
 }
 
+#[tauri::command]
+async fn exit_app(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    shutdown(state).await?;
+    app.exit(0);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     logging::init();
@@ -2139,7 +2146,8 @@ pub fn run() {
             speak_text,
             stop_all,
             resolve_server_request,
-            shutdown
+            shutdown,
+            exit_app
         ])
         .setup(move |app| {
             use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
