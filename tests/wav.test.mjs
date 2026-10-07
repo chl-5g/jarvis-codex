@@ -8,6 +8,7 @@ const backend = await readFile(new URL("../src-tauri/src/lib.rs", import.meta.ur
 const memoryBackend = await readFile(new URL("../src-tauri/src/memory.rs", import.meta.url), "utf8");
 const qwenBackend = await readFile(new URL("../src-tauri/src/on_device_model.rs", import.meta.url), "utf8");
 const promptsConfig = await readFile(new URL("../config/prompts.json", import.meta.url), "utf8");
+const providersConfig = await readFile(new URL("../config/providers.json", import.meta.url), "utf8");
 const uiConfig = await readFile(new URL("../config/ui.json", import.meta.url), "utf8");
 const voiceConfig = await readFile(new URL("../config/voice.json", import.meta.url), "utf8");
 const toolsConfig = await readFile(new URL("../config/tools.json", import.meta.url), "utf8");
@@ -96,9 +97,18 @@ test("bundled Codex runtime prefers one stable local CLI identity", () => {
   assert.match(codexWrapper, /JARVIS_REAL_CODEX_BIN/);
 });
 
+test("model providers are configuration-driven with an explicit fallback order", () => {
+  assert.match(providersConfig, /"primary": "codex"/);
+  assert.match(providersConfig, /"fallbackOrder": \["litellm", "localQwen"\]/);
+  assert.match(providersConfig, /"kind": "codex-app-server"/);
+  assert.match(providersConfig, /"kind": "openai-compatible"/);
+  assert.match(backend, /fn provider_config\(\) -> Value/);
+  assert.match(backend, /config::providers\(\)/);
+});
+
 test("wake phrase opens the same direct Voice path", () => {
   assert.match(frontend, /listen<WakeEvent>\("jarvis-wake"/);
-  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true, wakeAudio: payload\.speakerAudio \}\)/);
+  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true \}\)/);
   assert.match(frontend, /const attempts = coldStart \? 6 : 1/);
   assert.match(frontend, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
   assert.match(frontend, /recoverableColdStartError/);
@@ -118,10 +128,17 @@ test("wake phrase opens the same direct Voice path", () => {
   assert.match(wakeHelper, /"--test-wake"/);
 });
 
-test("wake reads memory before opening Voice", () => {
+test("wake loads private memory only after speaker verification", () => {
   assert.match(frontend, /prepare_wake_context/);
   assert.match(frontend, /await prepareWakeMemory\(\)/);
+  assert.doesNotMatch(frontend, /await prepareWakeMemory\(\);[\s\S]{0,120}void startDirectVoice/);
+  assert.doesNotMatch(frontend, /startSpeakerMonitor|verifySpeakerOnce\(stream, encodeWav/);
   assert.match(backend, /wake memory loaded/);
+  assert.match(backend, /wake memory withheld: speaker is not verified/);
+  assert.match(backend, /if speaker_access != SpeakerAccess::Allen/);
+  assert.match(frontend, /pendingMemoryGreeting/);
+  assert.match(frontend, /memoryGreetingPrompt/);
+  assert.match(frontend, /append_codex_voice_text/);
 });
 
 test("Voice sleeps after configured inactivity and waits for wake", () => {
@@ -160,7 +177,9 @@ test("wake listener accepts Chinese greeting and English Hi Jarvis phrases", () 
   assert.match(wakeConfig, /你好jarvis/);
   assert.match(wakeConfig, /"你好"/);
   assert.match(wakeConfig, /你好贾维斯/);
+  assert.match(wakeConfig, /你好，贾维斯/);
   assert.match(wakeConfig, /hi jarvis/);
+  assert.match(wakeHelper, /configuredPhrases = self\.phrases\.map\(self\.normalize\)/);
   assert.match(wakeConfig, /hijarvis/);
   assert.match(wakeHelper, /forResource: "wake"/);
 });
@@ -319,11 +338,15 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(backend, /speaker verification started/);
   assert.match(backend, /speaker verification result/);
   assert.match(frontend, /speakerAudio/);
-  assert.match(frontend, /startSpeakerMonitor/);
-  assert.match(frontend, /verifySpeakerOnce\(stream, encodeWav/);
+  assert.doesNotMatch(frontend, /startSpeakerMonitor|speakerMonitor/);
+  assert.match(frontend, /await verifySpeakerOnce\(microphoneStream\)/);
+  assert.match(frontend, /speakerVerificationStartTimeoutMs/);
+  assert.match(frontend, /await context\.resume\(\)/);
+  assert.match(frontend, /resampleAudio\(samples, captureRate, 16000\)/);
   assert.match(frontend, /speakerAccess === "allen" \? savedThreadId\(\) : null/);
   assert.match(backend, /Allen's private memory is loaded only after local speaker verification/);
   assert.match(backend, /set_speaker_access/);
+  assert.match(backend, /Never reuse a thread initialized under a different identity/);
   assert.match(backend, /当前语音段未通过 Allen 声纹验证/);
 });
 

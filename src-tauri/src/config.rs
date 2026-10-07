@@ -15,12 +15,17 @@ const CONNECTORS_JSON: &str = include_str!(concat!(
     "/../config/connectors.json"
 ));
 const TOOLS_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../config/tools.json"));
+const PROVIDERS_JSON: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../config/providers.json"
+));
 static CONFIG: OnceLock<Value> = OnceLock::new();
 static PERMISSIONS: OnceLock<Value> = OnceLock::new();
 static PATHS: OnceLock<Value> = OnceLock::new();
 static PROJECT_ROOT: OnceLock<String> = OnceLock::new();
 static CONNECTORS: OnceLock<Value> = OnceLock::new();
 static TOOLS: OnceLock<Value> = OnceLock::new();
+static PROVIDERS: OnceLock<Value> = OnceLock::new();
 
 fn value() -> &'static Value {
     CONFIG.get_or_init(|| {
@@ -85,6 +90,15 @@ fn tools() -> &'static Value {
     TOOLS.get_or_init(|| {
         serde_json::from_str(TOOLS_JSON).unwrap_or_else(|_| Value::Object(Default::default()))
     })
+}
+
+pub fn providers() -> Value {
+    PROVIDERS
+        .get_or_init(|| {
+            serde_json::from_str(PROVIDERS_JSON)
+                .unwrap_or_else(|_| Value::Object(Default::default()))
+        })
+        .clone()
 }
 
 pub fn prompt(key: &str) -> &'static str {

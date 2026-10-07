@@ -60,6 +60,11 @@ fn connector_list() -> Value {
     config::connectors()
 }
 
+#[tauri::command]
+fn provider_config() -> Value {
+    config::providers()
+}
+
 struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
@@ -173,9 +178,17 @@ async fn set_speaker_access(
     speaker_access: SpeakerAccess,
 ) -> Result<String, String> {
     let access = effective_speaker_access(speaker_access);
+    let mut runtime_changed = false;
     *state.speaker_access.write().await = access;
     if let Some(runtime) = state.runtime.lock().await.as_ref() {
+        runtime_changed = *runtime.speaker_access.read().await != access;
         *runtime.speaker_access.write().await = access;
+    }
+    // Never reuse a thread initialized under a different identity. Changing
+    // only the in-memory flag could leave Allen's private context in the
+    // existing Codex thread.
+    if runtime_changed {
+        terminate_runtime(&state).await?;
     }
     logging::text(
         "jarvis-runtime",
@@ -1553,7 +1566,8 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
         return Err("Codex Voice 尚未连接".to_owned());
     }
     let thread_id = runtime.thread().await?;
-    let text = with_memory_context(text);
+    let speaker_access = *runtime.speaker_access.read().await;
+    let text = with_memory_context(text, speaker_access);
     runtime
         .request(
             "thread/realtime/appendText",
@@ -1579,7 +1593,7 @@ async fn send_text(
     }
     let thread_id = runtime.thread().await?;
     crate::logging::conversation("user", text.trim(), "codex");
-    let text = with_memory_context(&text);
+    let text = with_memory_context(&text, speaker_access);
     runtime
         .request(
             "turn/start",
@@ -1602,7 +1616,10 @@ async fn cipherpipe_send(
     state.cipherpipe.send(&app, &text, peer.as_deref()).await
 }
 
-fn with_memory_context(text: &str) -> String {
+fn with_memory_context(text: &str, speaker_access: SpeakerAccess) -> String {
+    if speaker_access != SpeakerAccess::Allen {
+        return text.to_owned();
+    }
     let context = memory_store().recall(text, 4_000);
     let working = memory_store().read_working(2_000);
     let knowledge = knowledge::KnowledgeStore::default().context(text, 4_000);
@@ -1630,7 +1647,24 @@ struct WakeMemoryStatus {
 }
 
 #[tauri::command]
-fn prepare_wake_context() -> WakeMemoryStatus {
+fn prepare_wake_context(state: State<'_, AppState>) -> WakeMemoryStatus {
+    let speaker_access = effective_speaker_access(
+        state
+            .speaker_access
+            .try_read()
+            .map(|access| *access)
+            .unwrap_or(SpeakerAccess::Unknown),
+    );
+    if speaker_access != SpeakerAccess::Allen {
+        logging::text(
+            "jarvis-runtime",
+            "wake memory withheld: speaker is not verified",
+        );
+        return WakeMemoryStatus {
+            initial_context_chars: 0,
+            working_context_chars: 0,
+        };
+    }
     let initial = memory_store().initial_context(8_000);
     let working = memory_store().read_working(2_000);
     let status = WakeMemoryStatus {
@@ -1648,8 +1682,11 @@ fn prepare_wake_context() -> WakeMemoryStatus {
 }
 
 #[tauri::command]
-fn memory_recall(query: String) -> String {
-    memory_store().recall(&query, 4_000)
+async fn memory_recall(state: State<'_, AppState>, query: String) -> Result<String, String> {
+    if effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen {
+        return Err("当前说话者未通过 Allen 声纹验证，无法读取个人记忆".to_owned());
+    }
+    Ok(memory_store().recall(&query, 4_000))
 }
 
 #[tauri::command]
@@ -1830,6 +1867,9 @@ async fn tool_execute(
     args: Value,
 ) -> Result<tools::ToolResult, String> {
     let runtime = runtime(&state).await?;
+    if *runtime.speaker_access.read().await != SpeakerAccess::Allen {
+        return Err("当前说话者未通过 Allen 声纹验证，已阻止本地工具调用".to_owned());
+    }
     let workspace = PathBuf::from(runtime.workspace.clone());
     let full_access = runtime.permission_mode == PermissionMode::Full;
     Ok(tools::execute(app, &workspace, &tool_name, args, full_access).await)
@@ -2076,6 +2116,7 @@ pub fn run() {
             skills_match,
             skills_context,
             connector_list,
+            provider_config,
             knowledge_status,
             knowledge_scan,
             knowledge_search,

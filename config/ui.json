@@ -5,6 +5,7 @@
   "messages": {
     "wakeMemoryLoaded": "唤醒前记忆已读取",
     "wakeMemoryFailed": "唤醒记忆读取失败",
+    "memoryGreetingPrompt": "向我自然地打个招呼，只说一句你好啊。",
     "voiceIdleSleep": "静默超时，Jarvis 已休眠；请再次说唤醒词",
     "voiceIdleSleepFailed": "自动休眠失败",
     "voicePermissionTitle": "JARVIS NEEDS PERMISSION",

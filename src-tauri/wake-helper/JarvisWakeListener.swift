@@ -141,7 +141,8 @@ final class WakeListener {
             guard let self, !self.hasWoken else { return }
             if let result {
                 let spoken = self.normalize(result.bestTranscription.formattedString)
-                if self.phrases.contains(where: spoken.contains) {
+                let configuredPhrases = self.phrases.map(self.normalize)
+                if configuredPhrases.contains(where: spoken.contains) {
                     self.hasWoken = true
                     var event = [
                         "type": "wake",

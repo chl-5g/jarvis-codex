@@ -1,5 +1,9 @@
 {
   "timeouts": {
-    "voiceIdleSleepMs": 300000
+    "voiceIdleSleepMs": 300000,
+    "speakerVerificationStartTimeoutMs": 5000,
+    "speakerVerificationMaxMs": 6000,
+    "speakerVerificationMinSpeechMs": 1200,
+    "speakerVerificationSilenceMs": 700
   }
 }

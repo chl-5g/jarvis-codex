@@ -1,0 +1,26 @@
+{
+  "primary": "codex",
+  "fallbackOrder": ["litellm", "localQwen"],
+  "providers": {
+    "codex": {
+      "kind": "codex-app-server",
+      "enabled": true,
+      "binaryEnv": "JARVIS_CODEX_BIN",
+      "realtime": true
+    },
+    "litellm": {
+      "kind": "openai-compatible",
+      "enabled": true,
+      "baseUrlEnv": "JARVIS_LITELLM_BASE_URL",
+      "modelEnv": "JARVIS_LITELLM_MODEL",
+      "realtime": false
+    },
+    "localQwen": {
+      "kind": "openai-compatible",
+      "enabled": true,
+      "baseUrlEnv": "JARVIS_LOCAL_MODEL_BASE_URL",
+      "modelEnv": "JARVIS_LOCAL_MODEL",
+      "realtime": false
+    }
+  }
+}

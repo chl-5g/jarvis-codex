@@ -130,14 +130,7 @@ let recoverableColdStartError = false;
 let voiceIdleSleepTimer: number | null = null;
 let voiceIdleSleepInFlight = false;
 let wakeArmInFlight: Promise<void> | null = null;
-let speakerVerified = false;
-let speakerMonitorContext: AudioContext | null = null;
-let speakerMonitorProcessor: ScriptProcessorNode | null = null;
-let speakerMonitorSource: MediaStreamAudioSourceNode | null = null;
-let speakerMonitorSink: GainNode | null = null;
-let speakerMonitorChunks: Float32Array[] = [];
-let speakerSpeechActive = false;
-let speakerSilenceFrames = 0;
+let pendingMemoryGreeting = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -770,6 +763,12 @@ async function handle(message: Message) {
     streamState.textContent = "LIVE";
     appendStreamLine("Codex Voice 已连接", "system");
     response.textContent = "Codex 官方 Voice 已上线。你现在可以直接和 Jarvis 对话。";
+    if (pendingMemoryGreeting && state.speakerAccess === "allen") {
+      pendingMemoryGreeting = false;
+      void invoke("append_codex_voice_text", { text: uiConfig.messages.memoryGreetingPrompt }).catch((error) => {
+        appendStreamLine(`自动问候失败：${String(error)}`, "error");
+      });
+    }
   } else if (method === "thread/realtime/transcript/delta") {
     resetVoiceIdleSleepTimer();
     const delta = typeof params?.delta === "string" ? params.delta : "";
@@ -921,7 +920,6 @@ function attachAnalyser(stream: MediaStream, target: "microphone" | "remote") {
 }
 
 function cleanupPeer() {
-  stopSpeakerMonitor();
   peer?.close();
   peer = null;
   microphoneStream?.getTracks().forEach((track) => track.stop());
@@ -977,101 +975,87 @@ function encodeWav(samples: Float32Array, sampleRate: number): string {
   return btoa(binary);
 }
 
-async function verifySpeakerOnce(stream: MediaStream, preloadedAudio?: string) {
-  if (!SPEAKER_GATE_ENABLED) return;
-  let encoded = preloadedAudio;
-  if (!encoded) {
-    const context = new AudioContext({ sampleRate: 16000 });
-    const source = context.createMediaStreamSource(stream);
-    const processor = context.createScriptProcessor(4096, 1, 1);
-    const muted = context.createGain(); muted.gain.value = 0;
-    const chunks: Float32Array[] = [];
-    processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-    source.connect(processor); processor.connect(muted); muted.connect(context.destination);
-    response.textContent = "正在验证说话者…";
-    await sleep(2500);
-    processor.disconnect(); source.disconnect(); muted.disconnect(); await context.close();
-    const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-    const samples = new Float32Array(length); let offset = 0;
-    for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length; }
-    encoded = encodeWav(samples, 16000);
-  } else {
-    response.textContent = "正在验证说话者…";
+function resampleAudio(samples: Float32Array, fromRate: number, toRate: number): Float32Array {
+  if (!samples.length || fromRate === toRate) return samples;
+  const length = Math.max(1, Math.round(samples.length * toRate / fromRate));
+  const output = new Float32Array(length);
+  const ratio = fromRate / toRate;
+  for (let index = 0; index < length; index += 1) {
+    const source = index * ratio;
+    const left = Math.floor(source);
+    const right = Math.min(samples.length - 1, left + 1);
+    const weight = source - left;
+    output[index] = samples[left] * (1 - weight) + samples[right] * weight;
   }
+  return output;
+}
+
+async function verifySpeakerOnce(stream: MediaStream) {
+  if (!SPEAKER_GATE_ENABLED) return;
+  const context = new AudioContext({ sampleRate: 16000 });
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const muted = context.createGain(); muted.gain.value = 0;
+  source.connect(processor); processor.connect(muted); muted.connect(context.destination);
+  await context.resume();
+  response.textContent = "等待你说话并验证说话者…";
+  const captureRate = context.sampleRate;
+  const samples = await new Promise<Float32Array>((resolve, reject) => {
+    const chunks: Float32Array[] = [];
+    const startAt = performance.now();
+    let speechStarted = false;
+    let speechSamples = 0;
+    let silentSamples = 0;
+    const finish = (error?: Error) => {
+      window.clearTimeout(timer);
+      processor.disconnect(); source.disconnect(); muted.disconnect();
+      void context.close();
+      if (error) reject(error);
+      else {
+        const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+        const output = new Float32Array(length); let offset = 0;
+        for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.length; }
+        resolve(output);
+      }
+    };
+    const timer = window.setTimeout(() => {
+      finish(new Error("声纹采集超时：没有采集到有效语音"));
+    }, voiceConfig.timeouts.speakerVerificationStartTimeoutMs + voiceConfig.timeouts.speakerVerificationMaxMs);
+    processor.onaudioprocess = (event) => {
+      const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+      const rms = Math.sqrt(chunk.reduce((sum, value) => sum + value * value, 0) / Math.max(1, chunk.length));
+      const voiced = rms >= 0.012;
+      if (!speechStarted) {
+        if (!voiced) {
+          if (performance.now() - startAt >= voiceConfig.timeouts.speakerVerificationStartTimeoutMs) finish(new Error("声纹采集超时：没有采集到有效语音"));
+          return;
+        }
+        speechStarted = true;
+      }
+      chunks.push(chunk);
+      speechSamples += chunk.length;
+      silentSamples = voiced ? 0 : silentSamples + chunk.length;
+      const minSamples = captureRate * voiceConfig.timeouts.speakerVerificationMinSpeechMs / 1000;
+      const silenceSamples = captureRate * voiceConfig.timeouts.speakerVerificationSilenceMs / 1000;
+      const maxSamples = captureRate * voiceConfig.timeouts.speakerVerificationMaxMs / 1000;
+      if ((speechSamples >= minSamples && silentSamples >= silenceSamples) || speechSamples >= maxSamples) finish();
+    };
+  });
+  const normalized = resampleAudio(samples, captureRate, 16000);
+  if (normalized.length < 16_000) throw new Error("声纹采集没有得到足够的有效音频");
+  const encoded = encodeWav(normalized, 16000);
   try {
     const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encoded });
     state.speakerAccess = result.verified ? "allen" : "unknown";
-    speakerVerified = result.verified;
     await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
     updateSpeakerAccess(state.speakerAccess);
     appendStreamLine(result.verified ? "已验证：Allen" : "未识别说话者：普通会话", result.verified ? "system" : "error");
   } catch (error) {
     state.speakerAccess = "unknown";
-    speakerVerified = false;
     await invoke("set_speaker_access", { speakerAccess: "unknown" }).catch(() => undefined);
     updateSpeakerAccess(state.speakerAccess);
     appendStreamLine(`声纹验证不可用：${String(error)}`, "error");
   }
-}
-
-function stopSpeakerMonitor() {
-  speakerMonitorProcessor?.disconnect();
-  speakerMonitorSource?.disconnect();
-  speakerMonitorSink?.disconnect();
-  void speakerMonitorContext?.close();
-  speakerMonitorProcessor = null;
-  speakerMonitorSource = null;
-  speakerMonitorSink = null;
-  speakerMonitorContext = null;
-  speakerMonitorChunks = [];
-  speakerSpeechActive = false;
-  speakerSilenceFrames = 0;
-}
-
-function startSpeakerMonitor(stream: MediaStream) {
-  stopSpeakerMonitor();
-  if (!SPEAKER_GATE_ENABLED) return;
-  const context = new AudioContext({ sampleRate: 16000 });
-  const source = context.createMediaStreamSource(stream);
-  const processor = context.createScriptProcessor(2048, 1, 1);
-  const sink = context.createGain(); sink.gain.value = 0;
-  speakerMonitorContext = context;
-  speakerMonitorSource = source;
-  speakerMonitorProcessor = processor;
-  speakerMonitorSink = sink;
-  processor.onaudioprocess = (event) => {
-    const samples = new Float32Array(event.inputBuffer.getChannelData(0));
-    const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / Math.max(1, samples.length));
-    if (rms > 0.018) {
-      speakerSpeechActive = true;
-      speakerSilenceFrames = 0;
-      speakerMonitorChunks.push(samples);
-    } else if (speakerSpeechActive) {
-      speakerMonitorChunks.push(samples);
-      speakerSilenceFrames += 1;
-      if (speakerSilenceFrames >= 8) {
-        const chunks = speakerMonitorChunks;
-        speakerMonitorChunks = [];
-        speakerSpeechActive = false;
-        speakerSilenceFrames = 0;
-        const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-        const audio = new Float32Array(length); let offset = 0;
-        for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.length; }
-        if (length > 8000) void verifySpeakerOnce(stream, encodeWav(audio, 16000));
-      }
-    }
-    if (speakerMonitorChunks.length > 60) {
-      const chunks = speakerMonitorChunks;
-      speakerMonitorChunks = [];
-      speakerSpeechActive = false;
-      speakerSilenceFrames = 0;
-      const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-      const audio = new Float32Array(length); let offset = 0;
-      for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.length; }
-      void verifySpeakerOnce(stream, encodeWav(audio, 16000));
-    }
-  };
-  source.connect(processor); processor.connect(sink); sink.connect(context.destination);
 }
 
 async function ensureWorkspace() {
@@ -1092,7 +1076,7 @@ async function ensureWorkspace() {
   return workspace;
 }
 
-async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: boolean; wakeAudio?: string } = {}) {
+async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } = {}) {
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
@@ -1128,7 +1112,18 @@ async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: 
       await sleep(900);
     }
     microphoneStream = await acquireMicrophone(coldStart);
-    await verifySpeakerOnce(microphoneStream, wakeAudio);
+    // The wake phrase only triggers this path. It is too short and noisy to
+    // serve as an identity sample, so always capture a fresh full segment.
+    await verifySpeakerOnce(microphoneStream);
+    if (state.speakerAccess === "allen") {
+      try {
+        await prepareWakeMemory();
+        pendingMemoryGreeting = true;
+      } catch (error) {
+        pendingMemoryGreeting = false;
+        appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
+      }
+    }
     attachAnalyser(microphoneStream, "microphone");
 
     const connection = new RTCPeerConnection();
@@ -1137,7 +1132,6 @@ async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: 
     if (!track) throw new Error("未找到麦克风音轨");
     track.enabled = !state.muted;
     connection.addTrack(track, microphoneStream);
-    startSpeakerMonitor(microphoneStream);
     connection.createDataChannel("oai-events");
     connection.ontrack = (event) => {
       remoteStream = event.streams[0] ?? new MediaStream([event.track]);
@@ -1175,7 +1169,6 @@ async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: 
     updateVoiceInfo(info);
   } catch (error) {
     cleanupPeer();
-    stopSpeakerMonitor();
     state.directVoice = null;
     recoverableColdStartError = coldStart && isNotAllowedError(error);
     setMode("degraded");
@@ -1215,7 +1208,6 @@ async function stopDirectVoice() {
     updateVoiceInfo(info);
   } finally {
     cleanupPeer();
-    speakerVerified = false;
     state.speakerAccess = "unknown";
     updateSpeakerAccess(state.speakerAccess);
   }
@@ -1347,12 +1339,7 @@ if (currentWindow) {
       return;
     }
     banner.hidden = true;
-    try {
-      await prepareWakeMemory();
-    } catch (error) {
-      appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
-    }
-    void startDirectVoice({ coldStart: payload.cold === true, wakeAudio: payload.speakerAudio });
+    void startDirectVoice({ coldStart: payload.cold === true });
   });
 }
 $("#command-form").addEventListener("submit", async (event) => {
