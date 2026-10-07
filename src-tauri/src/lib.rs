@@ -191,6 +191,26 @@ async fn agent_task_receive(
 }
 
 #[tauri::command]
+fn agent_task_reject(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<agent_tasks::RemoteTask, String> {
+    state
+        .agent_tasks
+        .transition(&task_id, agent_tasks::RemoteTaskStatus::Rejected)
+}
+
+#[tauri::command]
+fn agent_task_cancel(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<agent_tasks::RemoteTask, String> {
+    state
+        .agent_tasks
+        .transition(&task_id, agent_tasks::RemoteTaskStatus::Cancelled)
+}
+
+#[tauri::command]
 fn agent_task_list(state: State<'_, AppState>) -> Vec<agent_tasks::RemoteTask> {
     state.agent_tasks.list()
 }
@@ -2275,6 +2295,8 @@ pub fn run() {
             agent_task_list,
             agent_task_send,
             agent_task_receive,
+            agent_task_reject,
+            agent_task_cancel,
             memory_status,
             prepare_wake_context,
             memory_recall,

@@ -42,6 +42,9 @@ impl TaskStore {
     pub fn list(&self) -> Vec<RemoteTask> {
         self.load().tasks
     }
+    pub fn get(&self, id: &str) -> Option<RemoteTask> {
+        self.load().tasks.into_iter().find(|task| task.id == id)
+    }
     pub fn create(&self, t: RemoteTask) -> Result<RemoteTask, String> {
         let mut f = self.load();
         if f.tasks.iter().any(|x| x.id == t.id) {
