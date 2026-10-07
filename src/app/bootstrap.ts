@@ -1237,7 +1237,18 @@ function setVoiceMuted(muted: boolean) {
 }
 
 if (currentWindow) {
-  await listen<JarvisEvent>("jarvis-event", ({ payload }) => {
+  await listen<JarvisEvent>("jarvis-event", async ({ payload }) => {
+    if (payload.kind === "agent-envelope") {
+      const envelope = payload.message as { kind?: string } | undefined;
+      if (envelope?.kind === "task_request") {
+        try {
+          await invoke("agent_task_receive", { envelope });
+        } catch (error) {
+          appendStreamLine(`远程 Agent 任务拒绝：${String(error)}`, "error", `agent-${payload.taskId ?? "unknown"}`);
+        }
+      }
+      return;
+    }
     if (payload.kind === "cipherpipe-message") {
       appendStreamLine(`CipherPipe：${payload.message ?? payload.output ?? "收到消息"}`, "assistant", "cipherpipe");
       return;
@@ -1683,7 +1694,10 @@ if (currentWindow) {
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
     } else if (!backgroundStart && state.mode === "ready") {
-      response.textContent = "Jarvis 已启动，等待你启用 Codex Voice。";
+      const readyMessage = uiConfig.messages.initializationComplete;
+      response.textContent = readyMessage;
+      appendStreamLine(readyMessage, "system");
+      void invoke("speak_text", { text: readyMessage }).catch(() => undefined);
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {
