@@ -87,6 +87,7 @@ pub async fn chat(app: AppHandle, text: String, workspace: PathBuf) -> Result<St
         crate::config::prompt("toolPolicy"),
         crate::config::prompt("capabilityPolicy"),
         crate::config::prompt("memoryPolicy"),
+        crate::config::prompt("speakerProfilePolicy"),
         crate::config::prompt("localFileOperationPolicy"),
         memory.as_str(),
         working.as_str(),

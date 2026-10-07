@@ -38,5 +38,13 @@
     "binaryEnv": "JARVIS_PDFSPINE_BIN",
     "auth": "workspace-file-access",
     "auditStream": "jarvis-events.jsonl"
+  },
+  "speaker_identity": {
+    "kind": "local-speaker-verification-and-profiles",
+    "enabledByDefault": true,
+    "modelEnv": "JARVIS_SPEAKER_MODEL",
+    "profileDirectory": "~/.config/jarvis/speakers",
+    "authorizationProfile": "Allen",
+    "auditStream": "jarvis-events.jsonl"
   }
 }

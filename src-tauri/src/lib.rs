@@ -1270,6 +1270,10 @@ async fn ensure_runtime(
         .replacen("{}", profile.instructions, 1)
         .replacen("{}", speaker_access.instructions(), 1)
         .replacen("{}", &foundation_context, 1);
+    let base_instructions = format!(
+        "{base_instructions}\n\n{}",
+        config::prompt("speakerProfilePolicy")
+    );
     let thread_options = json!({
         "cwd": cwd,
         "model": JARVIS_MODEL,
