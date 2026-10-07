@@ -30,6 +30,7 @@ type WakeEvent = {
   /** Set by the local speaker verifier when one is installed. */
   speaker?: SpeakerAccess;
   speakerAccess?: SpeakerAccess;
+  speakerAudio?: string;
 };
 type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
@@ -968,23 +969,29 @@ function encodeWav(samples: Float32Array, sampleRate: number): string {
   return btoa(binary);
 }
 
-async function verifySpeakerOnce(stream: MediaStream) {
+async function verifySpeakerOnce(stream: MediaStream, preloadedAudio?: string) {
   if (!SPEAKER_GATE_ENABLED || speakerVerified) return;
-  const context = new AudioContext({ sampleRate: 16000 });
-  const source = context.createMediaStreamSource(stream);
-  const processor = context.createScriptProcessor(4096, 1, 1);
-  const muted = context.createGain(); muted.gain.value = 0;
-  const chunks: Float32Array[] = [];
-  processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-  source.connect(processor); processor.connect(muted); muted.connect(context.destination);
-  response.textContent = "正在验证说话者…";
-  await sleep(2500);
-  processor.disconnect(); source.disconnect(); muted.disconnect(); await context.close();
-  const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-  const samples = new Float32Array(length); let offset = 0;
-  for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length; }
+  let encoded = preloadedAudio;
+  if (!encoded) {
+    const context = new AudioContext({ sampleRate: 16000 });
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const muted = context.createGain(); muted.gain.value = 0;
+    const chunks: Float32Array[] = [];
+    processor.onaudioprocess = (event) => chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    source.connect(processor); processor.connect(muted); muted.connect(context.destination);
+    response.textContent = "正在验证说话者…";
+    await sleep(2500);
+    processor.disconnect(); source.disconnect(); muted.disconnect(); await context.close();
+    const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+    const samples = new Float32Array(length); let offset = 0;
+    for (const chunk of chunks) { samples.set(chunk, offset); offset += chunk.length; }
+    encoded = encodeWav(samples, 16000);
+  } else {
+    response.textContent = "正在验证说话者…";
+  }
   try {
-    const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encodeWav(samples, 16000) });
+    const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encoded });
     state.speakerAccess = result.verified ? "allen" : "unknown";
     speakerVerified = result.verified;
     updateSpeakerAccess(state.speakerAccess);
@@ -1015,7 +1022,7 @@ async function ensureWorkspace() {
   return workspace;
 }
 
-async function startDirectVoice({ coldStart = false } = {}) {
+async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: boolean; wakeAudio?: string } = {}) {
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
@@ -1051,7 +1058,7 @@ async function startDirectVoice({ coldStart = false } = {}) {
       await sleep(900);
     }
     microphoneStream = await acquireMicrophone(coldStart);
-    await verifySpeakerOnce(microphoneStream);
+    await verifySpeakerOnce(microphoneStream, wakeAudio);
     attachAnalyser(microphoneStream, "microphone");
 
     const connection = new RTCPeerConnection();
@@ -1085,7 +1092,10 @@ async function startDirectVoice({ coldStart = false } = {}) {
 
     const info = await invoke<DirectVoice>("start_codex_voice", {
       cwd: workspace,
-      threadId: savedThreadId(),
+      // An unverified speaker must never inherit Allen's old Voice thread or
+      // its private context. The backend loads only public foundation context
+      // for this fresh anonymous thread.
+      threadId: state.speakerAccess === "allen" ? savedThreadId() : null,
       permissionMode,
       speakerAccess: state.speakerAccess,
       sdp,
@@ -1270,7 +1280,7 @@ if (currentWindow) {
     } catch (error) {
       appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
     }
-    void startDirectVoice({ coldStart: payload.cold === true });
+    void startDirectVoice({ coldStart: payload.cold === true, wakeAudio: payload.speakerAudio });
   });
 }
 $("#command-form").addEventListener("submit", async (event) => {

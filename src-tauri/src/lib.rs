@@ -999,6 +999,7 @@ fn start_wake_supervisor(app: AppHandle) {
 
         let mut woke = false;
         let mut wake_speaker_access = SpeakerAccess::Unknown;
+        let mut wake_speaker_audio: Option<String> = None;
         while state.wake_enabled.load(Ordering::SeqCst) {
             state.wake_ready.store(false, Ordering::SeqCst);
             let event_file =
@@ -1079,6 +1080,11 @@ fn start_wake_supervisor(app: AppHandle) {
                                     _ => SpeakerAccess::Unknown,
                                 })
                                 .unwrap_or(SpeakerAccess::Unknown);
+                            wake_speaker_audio = message
+                                .get("speakerAudio")
+                                .and_then(Value::as_str)
+                                .filter(|value| value.len() <= 1_000_000)
+                                .map(str::to_owned);
                             state.wake_enabled.store(false, Ordering::SeqCst);
                             state.wake_ready.store(false, Ordering::SeqCst);
                             raise_jarvis_window(&app);
@@ -1133,10 +1139,11 @@ fn start_wake_supervisor(app: AppHandle) {
                 SpeakerAccess::Rejected => "rejected",
                 SpeakerAccess::Unknown => "unknown",
             };
-            let _ = app.emit(
-                "jarvis-wake",
-                json!({"ok": true, "speakerAccess": speaker_access}),
-            );
+            let mut event = json!({"ok": true, "speakerAccess": speaker_access});
+            if let Some(audio) = wake_speaker_audio {
+                event["speakerAudio"] = Value::String(audio);
+            }
+            let _ = app.emit("jarvis-wake", event);
         }
         let _ = app.emit("jarvis-wake-status", wake_status_value(&state).await);
     });
@@ -1313,7 +1320,13 @@ async fn ensure_runtime(
         "capabilities": {"experimentalApi": true}
     })).await?;
     runtime.notify("initialized", json!({})).await?;
-    let memory_context = memory_store().initial_context(8_000);
+    // Allen's private memory is loaded only after local speaker verification.
+    // Unknown speakers receive a fresh anonymous thread and no private facts.
+    let memory_context = if speaker_access == SpeakerAccess::Allen {
+        memory_store().initial_context(8_000)
+    } else {
+        String::new()
+    };
     let skills_context = memory_store().skills_context(4_000);
     let foundation_context = [memory_context, skills_context]
         .into_iter()

@@ -9,6 +9,8 @@ final class WakeListener {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var hasWoken = false
+    private var recentSamples: [Int16] = []
+    private var recentSampleRate: Double = 16_000
     private let eventFile: URL?
     private let hostApp: URL?
 
@@ -113,6 +115,17 @@ final class WakeListener {
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             request.append(buffer)
+            guard let channel = buffer.floatChannelData?[0] else { return }
+            let count = Int(buffer.frameLength)
+            self.recentSampleRate = format.sampleRate
+            self.recentSamples.append(contentsOf: (0..<count).map { index in
+                let sample = max(-1.0, min(1.0, channel[index]))
+                return Int16(sample * 32767.0)
+            })
+            let limit = max(1, Int(format.sampleRate * 3.0))
+            if self.recentSamples.count > limit {
+                self.recentSamples.removeFirst(self.recentSamples.count - limit)
+            }
         }
 
         do {
@@ -130,10 +143,12 @@ final class WakeListener {
                 let spoken = self.normalize(result.bestTranscription.formattedString)
                 if self.phrases.contains(where: spoken.contains) {
                     self.hasWoken = true
-                    self.emit([
+                    var event = [
                         "type": "wake",
                         "phrase": result.bestTranscription.formattedString,
-                    ])
+                    ]
+                    event["speakerAudio"] = self.recentWav().base64EncodedString()
+                    self.emit(event)
                     self.stop()
                     self.openHostApp()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
@@ -148,6 +163,26 @@ final class WakeListener {
                 exit(6)
             }
         }
+    }
+
+    private func recentWav() -> Data {
+        var data = Data()
+        let payloadSize = recentSamples.count * 2
+        func appendASCII(_ value: String) { data.append(contentsOf: value.utf8) }
+        func appendUInt32(_ value: UInt32) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        func appendUInt16(_ value: UInt16) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        appendASCII("RIFF"); appendUInt32(UInt32(36 + payloadSize)); appendASCII("WAVE")
+        appendASCII("fmt "); appendUInt32(16); appendUInt16(1); appendUInt16(1)
+        appendUInt32(UInt32(recentSampleRate)); appendUInt32(UInt32(recentSampleRate * 2))
+        appendUInt16(2); appendUInt16(16); appendASCII("data"); appendUInt32(UInt32(payloadSize))
+        for sample in recentSamples { appendUInt16(UInt16(bitPattern: sample)) }
+        return data
     }
 
     private func stop() {

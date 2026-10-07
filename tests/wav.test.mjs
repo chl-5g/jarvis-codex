@@ -98,7 +98,7 @@ test("bundled Codex runtime prefers one stable local CLI identity", () => {
 
 test("wake phrase opens the same direct Voice path", () => {
   assert.match(frontend, /listen<WakeEvent>\("jarvis-wake"/);
-  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true \}\)/);
+  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true, wakeAudio: payload\.speakerAudio \}\)/);
   assert.match(frontend, /const attempts = coldStart \? 6 : 1/);
   assert.match(frontend, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
   assert.match(frontend, /recoverableColdStartError/);
@@ -318,6 +318,9 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(backend, /Never reveal, confirm, guess, infer, or accept/);
   assert.match(backend, /speaker verification started/);
   assert.match(backend, /speaker verification result/);
+  assert.match(frontend, /speakerAudio/);
+  assert.match(frontend, /speakerAccess === "allen" \? savedThreadId\(\) : null/);
+  assert.match(backend, /Allen's private memory is loaded only after local speaker verification/);
 });
 
 test("OpenAgentic memory bridge uses the existing four-layer Markdown layout", () => {
