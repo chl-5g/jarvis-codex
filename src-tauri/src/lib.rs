@@ -167,6 +167,28 @@ async fn verify_speaker(app: AppHandle, audio: String) -> Result<Value, String> 
     Ok(result)
 }
 
+#[tauri::command]
+async fn set_speaker_access(
+    state: State<'_, AppState>,
+    speaker_access: SpeakerAccess,
+) -> Result<String, String> {
+    let access = effective_speaker_access(speaker_access);
+    *state.speaker_access.write().await = access;
+    if let Some(runtime) = state.runtime.lock().await.as_ref() {
+        *runtime.speaker_access.write().await = access;
+    }
+    logging::text(
+        "jarvis-runtime",
+        &format!("speaker access updated: {:?}", access),
+    );
+    Ok(match access {
+        SpeakerAccess::Allen => "allen",
+        SpeakerAccess::Unknown => "unknown",
+        SpeakerAccess::Rejected => "rejected",
+    }
+    .to_owned())
+}
+
 #[cfg(not(target_os = "macos"))]
 #[tauri::command]
 async fn request_microphone_permission() -> Result<String, String> {
@@ -226,7 +248,7 @@ struct CodexRuntime {
     voice_phase: RwLock<String>,
     realtime_session_id: RwLock<Option<String>>,
     permission_mode: PermissionMode,
-    speaker_access: SpeakerAccess,
+    speaker_access: RwLock<SpeakerAccess>,
     workspace: String,
 }
 
@@ -410,7 +432,7 @@ impl CodexRuntime {
             voice_phase: RwLock::new("standby".to_owned()),
             realtime_session_id: RwLock::new(None),
             permission_mode,
-            speaker_access,
+            speaker_access: RwLock::new(speaker_access),
             workspace,
         });
 
@@ -468,14 +490,34 @@ impl CodexRuntime {
                         let request = message.clone();
                         tauri::async_runtime::spawn(async move {
                             let params = &request["params"];
-                            let result = tools::execute(
-                                app,
-                                &PathBuf::from(&runtime.workspace),
-                                params["tool"].as_str().unwrap_or(""),
-                                params["arguments"].clone(),
-                                runtime.permission_mode == PermissionMode::Full,
-                            )
-                            .await;
+                            let result =
+                                if *runtime.speaker_access.read().await != SpeakerAccess::Allen {
+                                    tools::ToolResult {
+                                        call_id: params["callId"]
+                                            .as_str()
+                                            .unwrap_or("speaker-gate")
+                                            .to_owned(),
+                                        tool_name: params["tool"]
+                                            .as_str()
+                                            .unwrap_or("unknown")
+                                            .to_owned(),
+                                        success: false,
+                                        output: String::new(),
+                                        error: Some(
+                                            "当前语音段未通过 Allen 声纹验证，已阻止本地工具调用"
+                                                .to_owned(),
+                                        ),
+                                    }
+                                } else {
+                                    tools::execute(
+                                        app,
+                                        &PathBuf::from(&runtime.workspace),
+                                        params["tool"].as_str().unwrap_or(""),
+                                        params["arguments"].clone(),
+                                        runtime.permission_mode == PermissionMode::Full,
+                                    )
+                                    .await
+                                };
                             let content = if result.success {
                                 result.output.clone()
                             } else {
@@ -1306,7 +1348,7 @@ async fn ensure_runtime(
     let existing = { state.runtime.lock().await.clone() };
     if let Some(existing) = existing {
         if existing.permission_mode == permission_mode
-            && existing.speaker_access == speaker_access
+            && *existing.speaker_access.read().await == speaker_access
             && existing.workspace == cwd
         {
             return Ok(existing);
@@ -1328,7 +1370,12 @@ async fn ensure_runtime(
         String::new()
     };
     let skills_context = memory_store().skills_context(4_000);
-    let foundation_context = [memory_context, skills_context]
+    let memory_status = if speaker_access == SpeakerAccess::Allen {
+        "The local speaker verifier has just identified Allen. Private memory was loaded for this Voice session; acknowledge that naturally if the user expects a response while it is being loaded."
+    } else {
+        "The speaker is not verified. Private memory was deliberately not loaded; address the speaker neutrally."
+    };
+    let foundation_context = [memory_status.to_owned(), memory_context, skills_context]
         .into_iter()
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
@@ -1527,7 +1574,7 @@ async fn send_text(
         return Err("未识别的说话人".to_owned());
     }
     let runtime = runtime(&state).await?;
-    if runtime.speaker_access != speaker_access {
+    if *runtime.speaker_access.read().await != speaker_access {
         return Err("说话人状态已变化，请重新建立安全会话".to_owned());
     }
     let thread_id = runtime.thread().await?;
@@ -2004,6 +2051,7 @@ pub fn run() {
             permission_status,
             request_microphone_permission,
             verify_speaker,
+            set_speaker_access,
             speech_permission_status,
             request_location,
             request_capability,

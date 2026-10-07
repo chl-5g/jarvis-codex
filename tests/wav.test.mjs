@@ -319,8 +319,12 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(backend, /speaker verification started/);
   assert.match(backend, /speaker verification result/);
   assert.match(frontend, /speakerAudio/);
+  assert.match(frontend, /startSpeakerMonitor/);
+  assert.match(frontend, /verifySpeakerOnce\(stream, encodeWav/);
   assert.match(frontend, /speakerAccess === "allen" \? savedThreadId\(\) : null/);
   assert.match(backend, /Allen's private memory is loaded only after local speaker verification/);
+  assert.match(backend, /set_speaker_access/);
+  assert.match(backend, /当前语音段未通过 Allen 声纹验证/);
 });
 
 test("OpenAgentic memory bridge uses the existing four-layer Markdown layout", () => {

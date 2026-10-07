@@ -131,6 +131,13 @@ let voiceIdleSleepTimer: number | null = null;
 let voiceIdleSleepInFlight = false;
 let wakeArmInFlight: Promise<void> | null = null;
 let speakerVerified = false;
+let speakerMonitorContext: AudioContext | null = null;
+let speakerMonitorProcessor: ScriptProcessorNode | null = null;
+let speakerMonitorSource: MediaStreamAudioSourceNode | null = null;
+let speakerMonitorSink: GainNode | null = null;
+let speakerMonitorChunks: Float32Array[] = [];
+let speakerSpeechActive = false;
+let speakerSilenceFrames = 0;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -914,6 +921,7 @@ function attachAnalyser(stream: MediaStream, target: "microphone" | "remote") {
 }
 
 function cleanupPeer() {
+  stopSpeakerMonitor();
   peer?.close();
   peer = null;
   microphoneStream?.getTracks().forEach((track) => track.stop());
@@ -970,7 +978,7 @@ function encodeWav(samples: Float32Array, sampleRate: number): string {
 }
 
 async function verifySpeakerOnce(stream: MediaStream, preloadedAudio?: string) {
-  if (!SPEAKER_GATE_ENABLED || speakerVerified) return;
+  if (!SPEAKER_GATE_ENABLED) return;
   let encoded = preloadedAudio;
   if (!encoded) {
     const context = new AudioContext({ sampleRate: 16000 });
@@ -994,14 +1002,76 @@ async function verifySpeakerOnce(stream: MediaStream, preloadedAudio?: string) {
     const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encoded });
     state.speakerAccess = result.verified ? "allen" : "unknown";
     speakerVerified = result.verified;
+    await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
     updateSpeakerAccess(state.speakerAccess);
     appendStreamLine(result.verified ? "已验证：Allen" : "未识别说话者：普通会话", result.verified ? "system" : "error");
   } catch (error) {
     state.speakerAccess = "unknown";
     speakerVerified = false;
+    await invoke("set_speaker_access", { speakerAccess: "unknown" }).catch(() => undefined);
     updateSpeakerAccess(state.speakerAccess);
     appendStreamLine(`声纹验证不可用：${String(error)}`, "error");
   }
+}
+
+function stopSpeakerMonitor() {
+  speakerMonitorProcessor?.disconnect();
+  speakerMonitorSource?.disconnect();
+  speakerMonitorSink?.disconnect();
+  void speakerMonitorContext?.close();
+  speakerMonitorProcessor = null;
+  speakerMonitorSource = null;
+  speakerMonitorSink = null;
+  speakerMonitorContext = null;
+  speakerMonitorChunks = [];
+  speakerSpeechActive = false;
+  speakerSilenceFrames = 0;
+}
+
+function startSpeakerMonitor(stream: MediaStream) {
+  stopSpeakerMonitor();
+  if (!SPEAKER_GATE_ENABLED) return;
+  const context = new AudioContext({ sampleRate: 16000 });
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(2048, 1, 1);
+  const sink = context.createGain(); sink.gain.value = 0;
+  speakerMonitorContext = context;
+  speakerMonitorSource = source;
+  speakerMonitorProcessor = processor;
+  speakerMonitorSink = sink;
+  processor.onaudioprocess = (event) => {
+    const samples = new Float32Array(event.inputBuffer.getChannelData(0));
+    const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / Math.max(1, samples.length));
+    if (rms > 0.018) {
+      speakerSpeechActive = true;
+      speakerSilenceFrames = 0;
+      speakerMonitorChunks.push(samples);
+    } else if (speakerSpeechActive) {
+      speakerMonitorChunks.push(samples);
+      speakerSilenceFrames += 1;
+      if (speakerSilenceFrames >= 8) {
+        const chunks = speakerMonitorChunks;
+        speakerMonitorChunks = [];
+        speakerSpeechActive = false;
+        speakerSilenceFrames = 0;
+        const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+        const audio = new Float32Array(length); let offset = 0;
+        for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.length; }
+        if (length > 8000) void verifySpeakerOnce(stream, encodeWav(audio, 16000));
+      }
+    }
+    if (speakerMonitorChunks.length > 60) {
+      const chunks = speakerMonitorChunks;
+      speakerMonitorChunks = [];
+      speakerSpeechActive = false;
+      speakerSilenceFrames = 0;
+      const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
+      const audio = new Float32Array(length); let offset = 0;
+      for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.length; }
+      void verifySpeakerOnce(stream, encodeWav(audio, 16000));
+    }
+  };
+  source.connect(processor); processor.connect(sink); sink.connect(context.destination);
 }
 
 async function ensureWorkspace() {
@@ -1067,6 +1137,7 @@ async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: 
     if (!track) throw new Error("未找到麦克风音轨");
     track.enabled = !state.muted;
     connection.addTrack(track, microphoneStream);
+    startSpeakerMonitor(microphoneStream);
     connection.createDataChannel("oai-events");
     connection.ontrack = (event) => {
       remoteStream = event.streams[0] ?? new MediaStream([event.track]);
@@ -1104,6 +1175,7 @@ async function startDirectVoice({ coldStart = false, wakeAudio }: { coldStart?: 
     updateVoiceInfo(info);
   } catch (error) {
     cleanupPeer();
+    stopSpeakerMonitor();
     state.directVoice = null;
     recoverableColdStartError = coldStart && isNotAllowedError(error);
     setMode("degraded");
