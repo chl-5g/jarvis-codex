@@ -80,7 +80,7 @@ const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEE
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
-const THREAD_KEY_PREFIX = "jarvis.threadId:v4:";
+const THREAD_KEY_PREFIX = "jarvis.threadId:v5-speaker:";
 // Use a new key so an older session that was left in safe mode does not make
 // the single-user deployment ask for approval on every task.
 const PERMISSION_KEY = "jarvis.permissionMode:v2";

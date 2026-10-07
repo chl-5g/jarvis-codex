@@ -241,7 +241,7 @@ test("idle text input uses the Codex task thread", () => {
 });
 
 test("new runtime instructions do not inherit stale Obsidian-only file workflow", () => {
-  assert.match(frontend, /jarvis\.threadId:v4:/);
+  assert.match(frontend, /jarvis\.threadId:v5-speaker:/);
   assert.match(promptsConfig, /HIGHEST PRIORITY FILE RULE/);
   assert.match(promptsConfig, /paths under ~\/notes/);
   assert.match(promptsConfig, /previous conversation preference to use Obsidian is superseded/);
