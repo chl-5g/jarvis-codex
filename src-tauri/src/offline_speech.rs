@@ -184,3 +184,20 @@ pub fn python_path() -> std::ffi::OsString {
     }
     "python3".into()
 }
+
+/// Speaker verification has its own environment because sherpa-onnx is not
+/// part of the MLX speech worker environment. Finder/LaunchServices do not
+/// inherit the shell that created the venv, so keep an explicit override and
+/// a stable per-user fallback.
+pub fn speaker_python_path() -> std::ffi::OsString {
+    if let Some(path) = std::env::var_os("JARVIS_SPEAKER_PYTHON") {
+        return path;
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home).join(".venvs/jarvis-speaker/bin/python");
+        if path.is_file() {
+            return path.into_os_string();
+        }
+    }
+    python_path()
+}

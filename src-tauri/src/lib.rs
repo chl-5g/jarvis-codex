@@ -136,7 +136,7 @@ async fn verify_speaker(app: AppHandle, audio: String) -> Result<Value, String> 
     };
     let file = std::env::temp_dir().join(format!("jarvis-speaker-{}.wav", std::process::id()));
     fs::write(&file, bytes).map_err(|e| format!("写入声纹样本失败：{e}"))?;
-    let output = Command::new(offline_speech::python_path()).arg(&script).arg("--verify").arg(&file)
+    let output = Command::new(offline_speech::speaker_python_path()).arg(&script).arg("--verify").arg(&file)
         .env("JARVIS_SPEAKER_MODEL", std::env::var("JARVIS_SPEAKER_MODEL").unwrap_or_else(|_| "/Users/caihaolun/models/speaker/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx".to_owned()))
         .env("JARVIS_SPEAKER_PROFILE", std::env::var("JARVIS_SPEAKER_PROFILE").unwrap_or_else(|_| "/Users/caihaolun/.config/jarvis/speakers/allen.json".to_owned()))
         .env("JARVIS_SPEAKER_THRESHOLD", std::env::var("JARVIS_SPEAKER_THRESHOLD").unwrap_or_else(|_| "0.85".to_owned()))
