@@ -1603,7 +1603,11 @@ async fn ensure_runtime(
     } else {
         String::new()
     };
-    let skills_context = memory_store().skills_context(4_000);
+    let skills_context = if speaker_access == SpeakerAccess::Allen {
+        memory_store().skills_context(4_000)
+    } else {
+        String::new()
+    };
     let memory_status = if speaker_access == SpeakerAccess::Allen {
         "The local speaker verifier has just identified Allen. Private memory was loaded for this Voice session; acknowledge that naturally if the user expects a response while it is being loaded."
     } else {
@@ -1633,6 +1637,11 @@ async fn ensure_runtime(
         }).collect::<Vec<_>>(),
         "baseInstructions": base_instructions
     });
+    let resume_thread_id = if speaker_access == SpeakerAccess::Allen {
+        resume_thread_id
+    } else {
+        None
+    };
     let started = if let Some(thread_id) = resume_thread_id.filter(|value| !value.trim().is_empty())
     {
         let mut resume_options = thread_options.clone();
@@ -1645,13 +1654,13 @@ async fn ensure_runtime(
             Ok(resumed) => resumed,
             Err(_) => {
                 let mut start_options = thread_options;
-                start_options["ephemeral"] = Value::Bool(false);
+                start_options["ephemeral"] = Value::Bool(speaker_access != SpeakerAccess::Allen);
                 runtime.request("thread/start", start_options).await?
             }
         }
     } else {
         let mut start_options = thread_options;
-        start_options["ephemeral"] = Value::Bool(false);
+        start_options["ephemeral"] = Value::Bool(speaker_access != SpeakerAccess::Allen);
         runtime.request("thread/start", start_options).await?
     };
     let thread_id = started

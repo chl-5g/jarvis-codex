@@ -352,6 +352,8 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(frontend, /const SPEAKER_GATE_ENABLED = true/);
   assert.match(frontend, /speakerAccess: "unknown"/);
   assert.match(frontend, /speakerAccess: state\.speakerAccess/);
+  assert.match(frontend, /if \(privateMemoryLoaded\) \{[\s\S]*append_codex_voice_text/);
+  assert.match(frontend, /state\.speakerAccess === "allen" \? savedThreadId\(\) : null/);
   assert.match(frontend, /已开放：完全访问/);
   assert.match(backend, /enum SpeakerAccess/);
   assert.match(backend, /SpeakerAccess::Unknown/);
@@ -361,6 +363,8 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(backend, /fn speaker_gate_enabled/);
   assert.match(backend, /JARVIS_SPEAKER_GATE/);
   assert.match(backend, /effective_speaker_access/);
+  assert.match(backend, /let skills_context = if speaker_access == SpeakerAccess::Allen/);
+  assert.match(backend, /speaker_access != SpeakerAccess::Allen/);
   assert.match(backend, /speaker_access\.instructions\(\)/);
   assert.match(backend, /Never reveal, confirm, guess, infer, or accept/);
   assert.match(backend, /speaker verification started/);

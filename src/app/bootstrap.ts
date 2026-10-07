@@ -711,7 +711,7 @@ function updateVoiceInfo(info: DirectVoice) {
   if (info.threadId) {
     state.session = { threadId: info.threadId, cwd: workspace };
     $("#thread-id").textContent = info.threadId;
-    saveThreadId(workspace, info.threadId);
+    if (state.speakerAccess === "allen") saveThreadId(workspace, info.threadId);
   }
   if (info.voiceActive) resetVoiceIdleSleepTimer();
   else clearVoiceIdleSleepTimer();
@@ -804,9 +804,11 @@ async function handle(message: Message) {
       const initializationVoicePrompt = privateMemoryLoaded
         ? uiConfig.messages.initializationVoicePrompt
         : uiConfig.messages.initializationUnverified;
-      void invoke("append_codex_voice_text", { text: initializationVoicePrompt }).catch((error) => {
-        appendStreamLine(`初始化语音提示失败：${String(error)}`, "error");
-      });
+      if (privateMemoryLoaded) {
+        void invoke("append_codex_voice_text", { text: initializationVoicePrompt }).catch((error) => {
+          appendStreamLine(`初始化语音提示失败：${String(error)}`, "error");
+        });
+      }
     }
   } else if (method === "thread/realtime/transcript/delta") {
     resetVoiceIdleSleepTimer();
@@ -1196,7 +1198,7 @@ async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } =
             permissionMode,
             speakerAccess,
           });
-          saveThreadId(workspace, state.session.threadId);
+          if (speakerAccess === "allen") saveThreadId(workspace, state.session.threadId);
           $("#thread-id").textContent = state.session.threadId;
           $("#workspace").textContent = state.session.cwd;
           return {
@@ -1543,11 +1545,11 @@ $("#command-form").addEventListener("submit", async (event) => {
   // changed Unknown/Allen access since the previous turn.
   state.session = await invoke<Session>("start_jarvis", {
     cwd: workspace,
-    threadId: savedThreadId(),
+    threadId: state.speakerAccess === "allen" ? savedThreadId() : null,
     permissionMode,
     speakerAccess: state.speakerAccess,
   });
-  saveThreadId(workspace, state.session.threadId);
+  if (state.speakerAccess === "allen") saveThreadId(workspace, state.session.threadId);
   $("#thread-id").textContent = state.session.threadId;
   $("#workspace").textContent = state.session.cwd;
   setMode("working");
@@ -1679,7 +1681,7 @@ $("#new-thread").addEventListener("click", async () => {
     });
     state.session = freshSession;
     state.directVoice = null;
-      saveThreadId(workspace, freshSession.threadId);
+      if (state.speakerAccess === "allen") saveThreadId(workspace, freshSession.threadId);
     $("#thread-id").textContent = freshSession.threadId;
     $("#workspace").textContent = freshSession.cwd;
     userTranscriptBuffer = "";
