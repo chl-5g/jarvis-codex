@@ -19,6 +19,9 @@ use tokio::{
     time::{timeout, Duration},
 };
 
+mod agent_protocol;
+mod agent_registry;
+mod agent_tasks;
 mod bridge;
 mod cipherpipe;
 mod config;
@@ -71,6 +74,8 @@ struct AppState {
     offline_speech: Arc<offline_speech::OfflineSpeech>,
     pdfspine: Arc<pdfspine::PdfSpine>,
     cipherpipe: Arc<cipherpipe::CipherPipe>,
+    agent_registry: agent_registry::AgentRegistry,
+    agent_tasks: agent_tasks::TaskStore,
     speaker_access: RwLock<SpeakerAccess>,
     cold_wake_pending: AtomicBool,
     background_start: bool,
@@ -79,6 +84,73 @@ struct AppState {
     wake_supervisor_running: AtomicBool,
     wake_pid: AtomicU32,
     wake_authorization: RwLock<String>,
+}
+
+#[tauri::command]
+fn agent_list(state: State<'_, AppState>) -> Vec<agent_registry::AgentRecord> {
+    state.agent_registry.list()
+}
+
+#[tauri::command]
+fn agent_register(
+    state: State<'_, AppState>,
+    record: agent_registry::AgentRecord,
+) -> Result<agent_registry::AgentRecord, String> {
+    state.agent_registry.upsert(record)
+}
+
+#[tauri::command]
+fn agent_remove(state: State<'_, AppState>, public_key: String) -> Result<(), String> {
+    state.agent_registry.remove(&public_key)
+}
+
+#[tauri::command]
+fn agent_task_list(state: State<'_, AppState>) -> Vec<agent_tasks::RemoteTask> {
+    state.agent_tasks.list()
+}
+
+#[tauri::command]
+async fn agent_task_send(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    peer: String,
+    capability: String,
+    input: Value,
+    expires_at: u64,
+    requires_approval: bool,
+) -> Result<agent_tasks::RemoteTask, String> {
+    if !state.agent_registry.authorize(&peer, &capability) {
+        return Err("peer or capability is not authorized".into());
+    }
+    let envelope = agent_protocol::task_request(
+        "local",
+        &peer,
+        &capability,
+        input.clone(),
+        expires_at,
+        requires_approval,
+    );
+    let task = agent_tasks::RemoteTask {
+        id: envelope.task_id.clone().ok_or("missing task id")?,
+        message_id: envelope.message_id.clone(),
+        peer: peer.clone(),
+        capability,
+        input,
+        status: agent_tasks::RemoteTaskStatus::Queued,
+        expires_at,
+        requires_approval,
+    };
+    state.agent_tasks.create(task.clone())?;
+    state
+        .cipherpipe
+        .send_envelope(&app, &envelope, Some(&peer))
+        .await?;
+    crate::events::emit(
+        &app,
+        "agent",
+        serde_json::json!({"kind":"agent-task","phase":"queued","taskId":task.id,"peer":peer}),
+    );
+    Ok(task)
 }
 
 #[tauri::command]
@@ -2078,6 +2150,8 @@ pub fn run() {
             offline_speech: offline_speech::OfflineSpeech::new(),
             pdfspine: pdfspine::PdfSpine::new(),
             cipherpipe: cipherpipe::CipherPipe::new(),
+            agent_registry: agent_registry::AgentRegistry::new(agent_registry::default_path()),
+            agent_tasks: agent_tasks::TaskStore::new(agent_tasks::default_path()),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
@@ -2109,6 +2183,11 @@ pub fn run() {
             append_codex_voice_text,
             send_text,
             cipherpipe_send,
+            agent_list,
+            agent_register,
+            agent_remove,
+            agent_task_list,
+            agent_task_send,
             memory_status,
             prepare_wake_context,
             memory_recall,

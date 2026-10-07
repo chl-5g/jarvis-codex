@@ -1,5 +1,6 @@
 //! Managed CipherPipe JSONL adapter. CipherPipe remains the encrypted transport;
 //! Jarvis keeps ownership of model routing, tools, and permissions.
+use crate::agent_protocol::AgentEnvelope;
 use serde_json::{json, Value};
 use std::{path::PathBuf, sync::Arc};
 use tauri::{AppHandle, Manager};
@@ -72,11 +73,43 @@ impl CipherPipe {
                     continue;
                 };
                 if value.get("event").and_then(Value::as_str) == Some("message") {
-                    crate::events::emit(
-                        &app_events,
-                        "cipherpipe",
-                        json!({"kind":"cipherpipe-message","from":value["from"],"text":value["text"],"id":value["id"]}),
-                    );
+                    let text = value
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    if let Some(raw) = text.strip_prefix("__JARVIS_AGENT__") {
+                        match serde_json::from_str::<AgentEnvelope>(raw) {
+                            Ok(envelope) => {
+                                if let Err(error) = crate::agent_protocol::validate_inbound(
+                                    &envelope,
+                                    crate::agent_protocol::now(),
+                                ) {
+                                    crate::events::emit(
+                                        &app_events,
+                                        "agent",
+                                        json!({"kind":"agent-task","phase":"rejected","messageId":envelope.message_id,"error":error}),
+                                    );
+                                } else {
+                                    crate::events::emit(
+                                        &app_events,
+                                        "agent",
+                                        json!({"kind":"agent-envelope","from":envelope.from,"to":envelope.to,"messageId":envelope.message_id,"taskId":envelope.task_id,"message":envelope}),
+                                    );
+                                }
+                            }
+                            Err(error) => crate::events::emit(
+                                &app_events,
+                                "agent",
+                                json!({"kind":"agent-task","phase":"rejected","error":format!("invalid agent envelope: {error}")}),
+                            ),
+                        }
+                    } else {
+                        crate::events::emit(
+                            &app_events,
+                            "cipherpipe",
+                            json!({"kind":"cipherpipe-message","from":value["from"],"text":text,"id":value["id"]}),
+                        );
+                    }
                 } else if tx.send(value).await.is_err() {
                     break;
                 }
@@ -89,6 +122,16 @@ impl CipherPipe {
             next_id: 1,
         });
         Ok(())
+    }
+    pub async fn send_envelope(
+        &self,
+        app: &AppHandle,
+        envelope: &AgentEnvelope,
+        peer: Option<&str>,
+    ) -> Result<(), String> {
+        let payload = serde_json::to_string(envelope).map_err(|e| e.to_string())?;
+        self.send(app, &format!("__JARVIS_AGENT__{payload}"), peer)
+            .await
     }
     pub async fn send(
         &self,
