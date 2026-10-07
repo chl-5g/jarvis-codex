@@ -217,7 +217,35 @@ test("Codex Voice is primary and local speech is only the fallback", () => {
 
 test("normal launch opens Codex Voice automatically", () => {
   assert.match(frontend, /!backgroundStart && state\.mode === "ready"/);
-  assert.match(frontend, /等待你启用 Codex Voice/);
+  assert.match(frontend, /initializationPending/);
+  assert.doesNotMatch(frontend, /pendingInitializationGreeting/);
+});
+
+test("voiceprint capture and avatar meter share the microphone callback", () => {
+  assert.match(frontend, /microphoneCaptureLevel = Math\.min\(1, rms \* 5\)/);
+  assert.match(frontend, /Math\.max\(analyserLevel\(microphoneAnalyser\), microphoneCaptureLevel\)/);
+  assert.match(frontend, /attachAnalyser\(microphoneStream, "microphone"\);/);
+  assert.match(frontend, /await verifySpeakerOnce\(microphoneStream\)/);
+  assert.match(frontend, /speakerVerificationAttempts/);
+});
+
+test("voice startup is coordinated by the sequential workflow", () => {
+  assert.match(frontend, /from "\.\.\/workflows\/voice-workflow\.mjs"/);
+  assert.match(frontend, /await runWorkflow\(/);
+  assert.match(frontend, /name: "capture-speaker"/);
+  assert.match(frontend, /name: "initialize-codex"/);
+  assert.match(frontend, /name: "load-memory"/);
+  assert.match(frontend, /name: "connect-voice"/);
+});
+
+test("unknown speaker runtime does not pass an invalid CUA MCP override", () => {
+  assert.doesNotMatch(backend, /mcp_servers\.cua_repl\.enabled=false/);
+  assert.match(backend, /mcp_servers\.node_repl\.enabled=false/);
+});
+
+test("Codex process exit closes pending workflow requests immediately", () => {
+  assert.match(backend, /pending\.lock\(\)[\s\S]*?drain\(\)/);
+  assert.match(backend, /Codex app-server 已退出/);
 });
 
 test("full permission auto-accepts server requests", () => {
@@ -340,9 +368,13 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(frontend, /speakerAudio/);
   assert.doesNotMatch(frontend, /startSpeakerMonitor|speakerMonitor/);
   assert.match(frontend, /await verifySpeakerOnce\(microphoneStream\)/);
-  assert.match(frontend, /speakerVerificationStartTimeoutMs/);
+  assert.match(frontend, /start_speaker_activity/);
+  assert.match(frontend, /feed_speaker_activity/);
+  assert.match(frontend, /speakerVerificationCapturing/);
+  assert.match(frontend, /speakerVerificationExtracting/);
   assert.match(frontend, /await context\.resume\(\)/);
-  assert.match(frontend, /resampleAudio\(samples, captureRate, 16000\)/);
+  assert.match(frontend, /resampleAudio\(chunk, captureRate, 16000\)/);
+  assert.match(frontend, /speakerVerificationCaptureTimeoutMs/);
   assert.match(frontend, /speakerAccess === "allen" \? savedThreadId\(\) : null/);
   assert.match(backend, /Allen's private memory is loaded only after local speaker verification/);
   assert.match(backend, /set_speaker_access/);

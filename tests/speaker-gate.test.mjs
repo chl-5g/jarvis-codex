@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const script = await readFile(new URL("../scripts/speaker_gate.py", import.meta.url), "utf8");
+const runtimeScript = await readFile(new URL("../src-tauri/speaker_identity.py", import.meta.url), "utf8");
 
 test("local speaker gate has explicit enrollment and fail-closed verification", () => {
   assert.match(script, /def enroll\(/);
@@ -16,4 +17,10 @@ test("local speaker gate has explicit enrollment and fail-closed verification", 
   assert.match(script, /def serve\(/);
   assert.match(script, /json\.loads\(line\)/);
   assert.match(script, /flush=True/);
+});
+
+test("runtime verifier trims silence and reports capture quality", () => {
+  assert.match(runtimeScript, /def trim_silence\(/);
+  assert.match(runtimeScript, /durationMs/);
+  assert.match(runtimeScript, /rms/);
 });

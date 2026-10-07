@@ -5,8 +5,16 @@
   "messages": {
     "wakeMemoryLoaded": "唤醒前记忆已读取",
     "wakeMemoryFailed": "唤醒记忆读取失败",
-    "initializationComplete": "Jarvis 已完成初始化，请说唤醒词：嗨，Jarvis",
-    "initializationVoicePrompt": "请用一句简短的话说：Jarvis 已完成初始化，请说唤醒词：嗨，Jarvis。",
+    "initializationPending": "Jarvis 已启动，正在等待唤醒词：嗨，Jarvis",
+    "initializationComplete": "Jarvis 已完成初始化，原生 Codex Agent、OpenAI Voice 和私人记忆已连接",
+    "initializationUnverified": "原生 Codex Agent 和 OpenAI Voice 已连接，但当前说话者未通过声纹验证，私人记忆未加载",
+    "initializationVoicePrompt": "请用一句简短的话确认：Jarvis 已完成初始化，原生 Codex Agent、OpenAI Voice 和私人记忆已连接。",
+    "workflowSteps": {
+      "capture-speaker": "正在采集声纹…",
+      "initialize-codex": "正在初始化原生 Codex Agent…",
+      "load-memory": "正在加载记忆策略…",
+      "connect-voice": "正在连接 OpenAI Voice…"
+    },
     "memoryGreetingPrompt": "向我自然地打个招呼，只说一句你好啊。",
     "voiceIdleSleep": "静默超时，Jarvis 已休眠；请再次说唤醒词",
     "voiceIdleSleepFailed": "自动休眠失败",

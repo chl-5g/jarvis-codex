@@ -33,6 +33,7 @@ mod offline_speech;
 mod on_device_model;
 mod pdfspine;
 mod skills;
+mod speaker_activity;
 mod tasks;
 mod tools;
 mod workflow;
@@ -77,6 +78,7 @@ struct AppState {
     agent_registry: agent_registry::AgentRegistry,
     agent_tasks: agent_tasks::TaskStore,
     speaker_access: RwLock<SpeakerAccess>,
+    speaker_activity: speaker_activity::SpeakerActivity,
     cold_wake_pending: AtomicBool,
     background_start: bool,
     wake_enabled: AtomicBool,
@@ -313,6 +315,25 @@ async fn request_microphone_permission() -> Result<String, String> {
         .await
         .map_err(|_| "macOS 麦克风授权回调中断".to_owned())?;
     Ok(if granted { "authorized" } else { "denied" }.to_owned())
+}
+
+#[tauri::command]
+async fn start_speaker_activity(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    state.speaker_activity.start(&app).await
+}
+
+#[tauri::command]
+async fn feed_speaker_activity(state: State<'_, AppState>, pcm: String) -> Result<Value, String> {
+    state.speaker_activity.feed(pcm).await
+}
+
+#[tauri::command]
+async fn stop_speaker_activity(state: State<'_, AppState>) -> Result<(), String> {
+    state.speaker_activity.stop().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -610,13 +631,10 @@ impl CodexRuntime {
             .kill_on_drop(true);
         if speaker_access != SpeakerAccess::Allen {
             // Unknown speakers can still ask questions, but the process does
-            // not expose either local desktop-control MCP entry point.
-            command.args([
-                "-c",
-                "mcp_servers.node_repl.enabled=false",
-                "-c",
-                "mcp_servers.cua_repl.enabled=false",
-            ]);
+            // not expose the local desktop-control MCP entry point. The
+            // cua_repl table is not present in every Codex config schema;
+            // overriding it creates an invalid transport before initialize.
+            command.args(["-c", "mcp_servers.node_repl.enabled=false"]);
         }
         let mut child = command
             .spawn()
@@ -788,12 +806,25 @@ impl CodexRuntime {
                 }
                 crate::events::emit(&event_app, "codex", message);
             }
+            if let Some(runtime) = weak.upgrade() {
+                eprintln!("codex diagnostic: Codex app-server 已退出");
+                let pending = runtime
+                    .pending
+                    .lock()
+                    .await
+                    .drain()
+                    .map(|(_, sender)| sender)
+                    .collect::<Vec<_>>();
+                for sender in pending {
+                    let _ = sender.send(Err("Codex app-server 已退出".to_owned()));
+                }
+            }
         });
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 eprintln!("codex stderr: {line}");
-                if line.contains("ERROR") {
+                if line.to_ascii_lowercase().contains("error") {
                     let _ = app.emit("codex-diagnostic", line);
                 }
             }
@@ -2239,6 +2270,7 @@ async fn resolve_server_request(
 
 #[tauri::command]
 async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
+    state.speaker_activity.stop().await;
     stop_speech(&state).await;
     state.pdfspine.shutdown().await;
     state.cipherpipe.stop().await;
@@ -2271,6 +2303,7 @@ pub fn run() {
             agent_registry: agent_registry::AgentRegistry::new(agent_registry::default_path()),
             agent_tasks: agent_tasks::TaskStore::new(agent_tasks::default_path()),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
+            speaker_activity: speaker_activity::SpeakerActivity::new(),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
             wake_enabled: AtomicBool::new(false),
@@ -2290,6 +2323,9 @@ pub fn run() {
             permission_status,
             request_microphone_permission,
             verify_speaker,
+            start_speaker_activity,
+            feed_speaker_activity,
+            stop_speaker_activity,
             set_speaker_access,
             speech_permission_status,
             request_location,

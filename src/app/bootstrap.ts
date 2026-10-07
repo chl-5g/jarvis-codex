@@ -11,6 +11,7 @@ import { refreshBridgeStatus as refreshBridgeStatusModule, showBridgeStatus as s
 import { cleanupVoiceResources, persistVoiceMute } from "../voice/voice-resources";
 import { createWakeController } from "../voice/wake-controller";
 import { createVoiceController } from "../voice/voice-controller";
+import { runWorkflow } from "../workflows/voice-workflow.mjs";
 import { ensureWorkspace as ensureWorkspaceModule, saveThreadId, saveWorkspace, savedThreadId as getSavedThreadId, savedWorkspace as getSavedWorkspace } from "../codex/session-store";
 // Session storage keys remain documented here for source-level compatibility: jarvis.workspace, jarvis.threadId:v5-speaker:
 // Workspace validation preserves the previous source contract: value !== "/".
@@ -42,6 +43,7 @@ type WakeEvent = {
 };
 type PermissionMode = "safe" | "auto" | "full";
 type SpeakerAccess = "unknown" | "allen" | "rejected";
+type SpeakerVerificationResult = { verified: boolean; score?: number; threshold?: number };
 type ModelMode = "hybrid" | "qwen" | "codex";
 type QwenEvent = { delta?: string; done?: boolean; error?: string };
 type WakeMemoryStatus = { initialContextChars: number; workingContextChars: number };
@@ -84,6 +86,7 @@ const state = {
 const PROJECT_ROOT = import.meta.env.VITE_PROJECTPATH || pathsConfig.projectRoot;
 const PROJECT_WORKSPACE = `${PROJECT_ROOT}/${pathsConfig.workspace}`;
 const VOICE_IDLE_SLEEP_MS = Number.parseInt(import.meta.env.VITE_VOICE_IDLE_SLEEP_MS ?? "", 10) || voiceConfig.timeouts.voiceIdleSleepMs;
+const workflowStepMessages: Record<string, string> = uiConfig.messages.workflowSteps;
 // Bump this when runtime instructions change materially. Older threads may
 // contain stale workflow preferences (for example, routing file edits through
 // Obsidian), so a new runtime policy must not inherit that conversation state.
@@ -125,6 +128,10 @@ let remoteStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let microphoneAnalyser: AnalyserNode | null = null;
 let remoteAnalyser: AnalyserNode | null = null;
+// The verifier and avatar share this value while the initial microphone
+// segment is being captured. It is written by the same ScriptProcessor frame
+// that decides whether a voiced segment has started.
+let microphoneCaptureLevel = 0;
 let userTranscriptBuffer = "";
 let assistantTranscriptBuffer = "";
 let agentMessageBuffer = "";
@@ -137,7 +144,8 @@ let voiceIdleSleepTimer: number | null = null;
 let voiceIdleSleepInFlight = false;
 let wakeArmInFlight: Promise<void> | null = null;
 let pendingMemoryGreeting = false;
-let pendingInitializationGreeting = false;
+let initializationAnnounced = false;
+let privateMemoryLoaded = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -671,9 +679,12 @@ function updateAudioMeters() {
     requestAnimationFrame(updateAudioMeters);
     return;
   }
-  const micLevel = analyserLevel(microphoneAnalyser);
+  const micLevel = Math.max(analyserLevel(microphoneAnalyser), microphoneCaptureLevel);
   const speakerLevel = analyserLevel(remoteAnalyser);
-  state.level = Math.max(state.level, micLevel, speakerLevel);
+  // Keep the meter tied to the current audio frame. Retaining the historical
+  // maximum made the avatar keep moving after audio had stopped, which looked
+  // like the microphone was still being heard.
+  state.level = Math.max(micLevel, speakerLevel, state.level * 0.86);
   shell.style.setProperty("--voice-pulse", String(1 + state.level * .026));
   shell.style.setProperty("--voice-glow", String(.45 + state.level * .55));
   if (state.directVoice?.voiceActive && !state.agentWorking) {
@@ -783,9 +794,17 @@ async function handle(message: Message) {
         appendStreamLine(`自动问候失败：${String(error)}`, "error");
       });
     }
-    if (pendingInitializationGreeting) {
-      pendingInitializationGreeting = false;
-      void invoke("append_codex_voice_text", { text: uiConfig.messages.initializationVoicePrompt }).catch((error) => {
+    if (!initializationAnnounced) {
+      initializationAnnounced = true;
+      const initializationMessage = privateMemoryLoaded
+        ? uiConfig.messages.initializationComplete
+        : uiConfig.messages.initializationUnverified;
+      response.textContent = initializationMessage;
+      appendStreamLine(initializationMessage, "system");
+      const initializationVoicePrompt = privateMemoryLoaded
+        ? uiConfig.messages.initializationVoicePrompt
+        : uiConfig.messages.initializationUnverified;
+      void invoke("append_codex_voice_text", { text: initializationVoicePrompt }).catch((error) => {
         appendStreamLine(`初始化语音提示失败：${String(error)}`, "error");
       });
     }
@@ -994,6 +1013,17 @@ function encodeWav(samples: Float32Array, sampleRate: number): string {
   return btoa(binary);
 }
 
+function encodePcmFrame(samples: Float32Array): string {
+  const bytes = new ArrayBuffer(samples.length * 2);
+  const view = new DataView(bytes);
+  samples.forEach((sample, index) => view.setInt16(index * 2, Math.max(-1, Math.min(1, sample)) * 32767, true));
+  let binary = "";
+  const raw = new Uint8Array(bytes);
+  const chunk = 0x8000;
+  for (let index = 0; index < raw.length; index += chunk) binary += String.fromCharCode(...raw.subarray(index, index + chunk));
+  return btoa(binary);
+}
+
 function resampleAudio(samples: Float32Array, fromRate: number, toRate: number): Float32Array {
   if (!samples.length || fromRate === toRate) return samples;
   const length = Math.max(1, Math.round(samples.length * toRate / fromRate));
@@ -1009,71 +1039,77 @@ function resampleAudio(samples: Float32Array, fromRate: number, toRate: number):
   return output;
 }
 
-async function verifySpeakerOnce(stream: MediaStream) {
-  if (!SPEAKER_GATE_ENABLED) return;
+async function verifySpeakerOnce(stream: MediaStream): Promise<SpeakerVerificationResult> {
+  if (!SPEAKER_GATE_ENABLED) return { verified: true };
+  microphoneCaptureLevel = 0;
+  await invoke("start_speaker_activity");
   const context = new AudioContext({ sampleRate: 16000 });
   const source = context.createMediaStreamSource(stream);
   const processor = context.createScriptProcessor(4096, 1, 1);
   const muted = context.createGain(); muted.gain.value = 0;
   source.connect(processor); processor.connect(muted); muted.connect(context.destination);
   await context.resume();
-  response.textContent = "等待你说话并验证说话者…";
+  response.textContent = voiceConfig.messages.speakerVerificationPrompt;
   const captureRate = context.sampleRate;
-  const samples = await new Promise<Float32Array>((resolve, reject) => {
-    const chunks: Float32Array[] = [];
-    const startAt = performance.now();
-    let speechStarted = false;
-    let speechSamples = 0;
-    let silentSamples = 0;
-    const finish = (error?: Error) => {
+  let result: SpeakerVerificationResult;
+  try {
+    result = await new Promise<SpeakerVerificationResult>((resolve, reject) => {
+    let settled = false;
+    let requestChain = Promise.resolve();
+    const finish = (error?: Error, verification?: SpeakerVerificationResult) => {
+      if (settled) return;
+      settled = true;
       window.clearTimeout(timer);
       processor.disconnect(); source.disconnect(); muted.disconnect();
       void context.close();
       if (error) reject(error);
-      else {
-        const length = chunks.reduce((total, chunk) => total + chunk.length, 0);
-        const output = new Float32Array(length); let offset = 0;
-        for (const chunk of chunks) { output.set(chunk, offset); offset += chunk.length; }
-        resolve(output);
-      }
+      else if (verification) resolve(verification);
     };
     const timer = window.setTimeout(() => {
-      finish(new Error("声纹采集超时：没有采集到有效语音"));
-    }, voiceConfig.timeouts.speakerVerificationStartTimeoutMs + voiceConfig.timeouts.speakerVerificationMaxMs);
+      finish(new Error(voiceConfig.messages.speakerVerificationNoSpeech));
+    }, voiceConfig.timeouts.speakerVerificationCaptureTimeoutMs);
     processor.onaudioprocess = (event) => {
+      if (settled) return;
       const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
       const rms = Math.sqrt(chunk.reduce((sum, value) => sum + value * value, 0) / Math.max(1, chunk.length));
-      const voiced = rms >= 0.012;
-      if (!speechStarted) {
-        if (!voiced) {
-          if (performance.now() - startAt >= voiceConfig.timeouts.speakerVerificationStartTimeoutMs) finish(new Error("声纹采集超时：没有采集到有效语音"));
-          return;
-        }
-        speechStarted = true;
-      }
-      chunks.push(chunk);
-      speechSamples += chunk.length;
-      silentSamples = voiced ? 0 : silentSamples + chunk.length;
-      const minSamples = captureRate * voiceConfig.timeouts.speakerVerificationMinSpeechMs / 1000;
-      const silenceSamples = captureRate * voiceConfig.timeouts.speakerVerificationSilenceMs / 1000;
-      const maxSamples = captureRate * voiceConfig.timeouts.speakerVerificationMaxMs / 1000;
-      if ((speechSamples >= minSamples && silentSamples >= silenceSamples) || speechSamples >= maxSamples) finish();
+      // Keep the UI meter and the verifier on the exact same audio callback.
+      microphoneCaptureLevel = Math.min(1, rms * 5);
+      requestChain = requestChain.then(async () => {
+        if (settled) return;
+        const normalized = resampleAudio(chunk, captureRate, 16000);
+        const activity = await invoke<{ ready: boolean; speaking: boolean; speechMs: number; audio?: string }>("feed_speaker_activity", { pcm: encodePcmFrame(normalized) });
+        if (activity.speaking) response.textContent = voiceConfig.messages.speakerVerificationCapturing;
+        if (!activity.ready || !activity.audio) return;
+        response.textContent = voiceConfig.messages.speakerVerificationExtracting;
+        const verification = await invoke<SpeakerVerificationResult>("verify_speaker", { audio: activity.audio });
+        finish(undefined, verification);
+      }).catch((error) => finish(error instanceof Error ? error : new Error(String(error))));
     };
-  });
-  const normalized = resampleAudio(samples, captureRate, 16000);
-  if (normalized.length < 16_000) throw new Error("声纹采集没有得到足够的有效音频");
-  const encoded = encodeWav(normalized, 16000);
+    });
+  } finally {
+    microphoneCaptureLevel = 0;
+    await invoke("stop_speaker_activity").catch(() => undefined);
+  }
   try {
-    const result = await invoke<{ verified: boolean }>("verify_speaker", { audio: encoded });
+    const score = typeof result.score === "number" ? result.score.toFixed(3) : "unknown";
+    const threshold = typeof result.threshold === "number" ? result.threshold.toFixed(3) : "unknown";
+    console.info("Jarvis speaker verification", { score, threshold });
     state.speakerAccess = result.verified ? "allen" : "unknown";
     await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
     updateSpeakerAccess(state.speakerAccess);
-    appendStreamLine(result.verified ? "已验证：Allen" : "未识别说话者：普通会话", result.verified ? "system" : "error");
+    appendStreamLine(
+      result.verified
+        ? `已验证：Allen（相似度 ${score}）`
+        : `未识别说话者：普通会话（相似度 ${score}，阈值 ${threshold}）`,
+      result.verified ? "system" : "error",
+    );
+    return result;
   } catch (error) {
     state.speakerAccess = "unknown";
     await invoke("set_speaker_access", { speakerAccess: "unknown" }).catch(() => undefined);
     updateSpeakerAccess(state.speakerAccess);
     appendStreamLine(`声纹验证不可用：${String(error)}`, "error");
+    return { verified: false };
   }
 }
 
@@ -1106,81 +1142,141 @@ async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } =
   if (voiceStartInFlight || peer || state.directVoice?.voiceActive) return;
   await ensureWorkspace();
   voiceStartInFlight = true;
+  privateMemoryLoaded = false;
+  pendingMemoryGreeting = false;
   state.manualStop = false;
   recoverableColdStartError = false;
   setMode("voice-starting");
   banner.hidden = true;
-  response.textContent = "正在建立 Codex 官方 Voice V3 WebRTC 会话…";
+
   try {
-    const microphoneAuthorization = await invoke<string>("request_microphone_permission");
-    if (microphoneAuthorization !== "authorized") {
-      throw new Error("请在系统设置 → 隐私与安全性 → 麦克风中允许 Jarvis Codex。");
-    }
-    await invoke("disarm_wake_listener");
-    if (coldStart) {
-      // A newly created WKWebView can reject an otherwise-authorized
-      // getUserMedia call until its first visible/focused render cycle.
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      );
-      await sleep(900);
-    }
-    microphoneStream = await acquireMicrophone(coldStart);
-    // The wake phrase only triggers this path. It is too short and noisy to
-    // serve as an identity sample, so always capture a fresh full segment.
-    await verifySpeakerOnce(microphoneStream);
-    if (state.speakerAccess === "allen") {
-      try {
-        await prepareWakeMemory();
-        pendingMemoryGreeting = true;
-      } catch (error) {
-        pendingMemoryGreeting = false;
-        appendStreamLine(`${uiConfig.messages.wakeMemoryFailed}：${String(error)}`, "error");
-      }
-    }
-    attachAnalyser(microphoneStream, "microphone");
+    const workflow = await runWorkflow([
+      {
+        name: "capture-speaker",
+        run: async () => {
+          const microphoneAuthorization = await invoke<string>("request_microphone_permission");
+          if (microphoneAuthorization !== "authorized") {
+            throw new Error("请在系统设置 → 隐私与安全性 → 麦克风中允许 Jarvis Codex。");
+          }
+          await invoke("disarm_wake_listener");
+          if (coldStart) {
+            // A newly created WKWebView can reject an otherwise-authorized
+            // getUserMedia call until its first visible/focused render cycle.
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+            await sleep(900);
+          }
+          microphoneStream = await acquireMicrophone(coldStart);
+          const microphoneTrack = microphoneStream.getAudioTracks()[0];
+          console.info("Jarvis microphone stream", {
+            label: microphoneTrack?.label || "default",
+            settings: microphoneTrack?.getSettings(),
+          });
+          // Attach the analyser before voiceprint capture. The avatar now reflects
+          // the same microphone stream that the verifier is consuming.
+          attachAnalyser(microphoneStream, "microphone");
+          // The wake phrase only triggers this path. It is too short and noisy to
+          // serve as an identity sample, so always capture a fresh full segment.
+          let verification: SpeakerVerificationResult = { verified: false };
+          for (let attempt = 0; attempt < voiceConfig.timeouts.speakerVerificationAttempts; attempt += 1) {
+            if (attempt > 0) response.textContent = voiceConfig.messages.speakerVerificationRetryPrompt;
+            verification = await verifySpeakerOnce(microphoneStream);
+            if (verification.verified) break;
+          }
+          return { speakerAccess: state.speakerAccess, speakerScore: verification.score };
+        },
+      },
+      {
+        name: "initialize-codex",
+        run: async ({ speakerAccess }) => {
+          state.session = await invoke<Session>("start_jarvis", {
+            cwd: workspace,
+            threadId: speakerAccess === "allen" ? savedThreadId() : null,
+            permissionMode,
+            speakerAccess,
+          });
+          saveThreadId(workspace, state.session.threadId);
+          $("#thread-id").textContent = state.session.threadId;
+          $("#workspace").textContent = state.session.cwd;
+          return {
+            threadId: state.session.threadId,
+            codexConnected: true,
+          };
+        },
+      },
+      {
+        name: "load-memory",
+        run: async ({ speakerAccess }) => {
+          if (speakerAccess !== "allen") {
+            privateMemoryLoaded = false;
+            return { privateMemoryLoaded: false };
+          }
+          await prepareWakeMemory();
+          pendingMemoryGreeting = true;
+          return { privateMemoryLoaded: true };
+        },
+      },
+      {
+        name: "connect-voice",
+        run: async ({ speakerAccess, threadId }) => {
+          const connection = new RTCPeerConnection();
+          peer = connection;
+          const track = microphoneStream?.getAudioTracks()[0];
+          if (!microphoneStream || !track) throw new Error("未找到麦克风音轨");
+          track.enabled = !state.muted;
+          connection.addTrack(track, microphoneStream);
+          connection.createDataChannel("oai-events");
+          connection.ontrack = (event) => {
+            remoteStream = event.streams[0] ?? new MediaStream([event.track]);
+            voiceAudio.srcObject = remoteStream;
+            voiceAudio.muted = false;
+            attachAnalyser(remoteStream, "remote");
+            void audioContext?.resume();
+            void voiceAudio.play().catch((error) => {
+              response.textContent = `Codex Voice 音频播放失败：${String(error)}`;
+            });
+          };
+          connection.onconnectionstatechange = () => {
+            if (connection.connectionState === "failed") {
+              setMode("degraded");
+              response.textContent = "Codex Voice WebRTC 连接失败。";
+            }
+          };
+          const offer = await connection.createOffer();
+          await connection.setLocalDescription(offer);
+          await waitForIceGathering(connection);
+          const sdp = connection.localDescription?.sdp;
+          if (!sdp) throw new Error("WebRTC 未生成 SDP offer");
 
-    const connection = new RTCPeerConnection();
-    peer = connection;
-    const track = microphoneStream.getAudioTracks()[0];
-    if (!track) throw new Error("未找到麦克风音轨");
-    track.enabled = !state.muted;
-    connection.addTrack(track, microphoneStream);
-    connection.createDataChannel("oai-events");
-    connection.ontrack = (event) => {
-      remoteStream = event.streams[0] ?? new MediaStream([event.track]);
-      voiceAudio.srcObject = remoteStream;
-      voiceAudio.muted = false;
-      attachAnalyser(remoteStream, "remote");
-      void audioContext?.resume();
-      void voiceAudio.play().catch((error) => {
-        response.textContent = `Codex Voice 音频播放失败：${String(error)}`;
-      });
-    };
-    connection.onconnectionstatechange = () => {
-      if (connection.connectionState === "failed") {
-        setMode("degraded");
-        response.textContent = "Codex Voice WebRTC 连接失败。";
-      }
-    };
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    await waitForIceGathering(connection);
-    const sdp = connection.localDescription?.sdp;
-    if (!sdp) throw new Error("WebRTC 未生成 SDP offer");
-
-    const info = await invoke<DirectVoice>("start_codex_voice", {
-      cwd: workspace,
-      // An unverified speaker must never inherit Allen's old Voice thread or
-      // its private context. The backend loads only public foundation context
-      // for this fresh anonymous thread.
-      threadId: state.speakerAccess === "allen" ? savedThreadId() : null,
-      permissionMode,
-      speakerAccess: state.speakerAccess,
-      sdp,
-      voice: "cove",
+          const info = await invoke<DirectVoice>("start_codex_voice", {
+            cwd: workspace,
+            // An unverified speaker must never inherit Allen's old Voice thread or
+            // its private context. The backend loads only public foundation context
+            // for this fresh anonymous thread.
+            threadId,
+            permissionMode,
+            speakerAccess,
+            sdp,
+            voice: "cove",
+          });
+          updateVoiceInfo(info);
+          await waitForVoiceActive();
+          return { voiceInfo: state.directVoice, voiceConnected: true };
+        },
+      },
+    ], {
+      onStepStart: (name) => {
+        appendStreamLine(`工作流开始：${name}`, "task");
+        const message = workflowStepMessages[name];
+        if (message) response.textContent = message;
+      },
+      onStepSuccess: (name) => appendStreamLine(`工作流完成：${name}`, "system"),
+      onFailure: (name, error) => appendStreamLine(`工作流失败：${name}：${error.message}`, "error"),
     });
-    updateVoiceInfo(info);
+    if (workflow.state !== "ready") {
+      throw workflow.error ?? new Error(`Jarvis workflow failed at ${workflow.failedStep ?? "unknown step"}`);
+    }
   } catch (error) {
     cleanupPeer();
     state.directVoice = null;
@@ -1200,6 +1296,7 @@ async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } =
 
 async function prepareWakeMemory() {
   const status = await invoke<WakeMemoryStatus>("prepare_wake_context");
+  privateMemoryLoaded = true;
   appendStreamLine(
     `${uiConfig.messages.wakeMemoryLoaded} · ${status.initialContextChars + status.workingContextChars} 字符`,
     "system",
@@ -1701,10 +1798,9 @@ if (currentWindow) {
     if (await invoke<boolean>("consume_cold_wake")) {
       transcript.textContent = "“嗨，Jarvis”";
     } else if (!backgroundStart && state.mode === "ready") {
-      const readyMessage = uiConfig.messages.initializationComplete;
+      const readyMessage = uiConfig.messages.initializationPending;
       response.textContent = readyMessage;
       appendStreamLine(readyMessage, "system");
-      pendingInitializationGreeting = true;
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {

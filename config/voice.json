@@ -1,9 +1,27 @@
 {
   "timeouts": {
     "voiceIdleSleepMs": 300000,
-    "speakerVerificationStartTimeoutMs": 5000,
+    "speakerVerificationStartTimeoutMs": 30000,
     "speakerVerificationMaxMs": 6000,
-    "speakerVerificationMinSpeechMs": 1200,
-    "speakerVerificationSilenceMs": 700
+    "speakerVerificationMinSpeechMs": 600,
+    "speakerVerificationCaptureTimeoutMs": 20000,
+    "speakerVerificationSilenceMs": 700,
+    "speakerVerificationAttempts": 1
+  },
+  "vad": {
+    "model": "/Users/caihaolun/models/speaker/silero_vad.onnx",
+    "threshold": 0.6,
+    "minSpeechMs": 250,
+    "minSilenceMs": 250,
+    "maxPendingFrames": 30
+  },
+  "messages": {
+    "speakerVerificationPrompt": "正在监听，检测到你说话后自动识别声纹…",
+    "speakerVerificationCapturing": "已检测到你在说话，正在积累人声并识别声纹…",
+    "speakerVerificationExtracting": "人声样本已就绪，正在提取声纹…",
+    "speakerVerificationRetryPrompt": "正在等待下一段人声…",
+    "speakerVerificationNoSpeech": "等待说话超时，未提取声纹",
+    "speakerVerificationTooShort": "有效人声不足，未提取声纹",
+    "speakerVerificationOverload": "人声检测处理过慢，请重新唤醒"
   }
 }
