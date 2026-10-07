@@ -28,6 +28,7 @@ mod logging;
 mod memory;
 mod offline_speech;
 mod on_device_model;
+mod pdfspine;
 mod skills;
 mod tasks;
 mod tools;
@@ -63,6 +64,7 @@ struct AppState {
     runtime: Mutex<Option<Arc<CodexRuntime>>>,
     speech: Mutex<Option<Child>>,
     offline_speech: Arc<offline_speech::OfflineSpeech>,
+    pdfspine: Arc<pdfspine::PdfSpine>,
     cipherpipe: Arc<cipherpipe::CipherPipe>,
     speaker_access: RwLock<SpeakerAccess>,
     cold_wake_pending: AtomicBool,
@@ -849,6 +851,15 @@ pub(crate) async fn request_camera_capture(app: AppHandle) -> Result<String, Str
     }
 }
 
+pub(crate) async fn request_pdfspine(
+    app: AppHandle,
+    workspace: &std::path::Path,
+    operation: &str,
+    params: Value,
+) -> Result<Value, String> {
+    pdfspine::request(&app, operation, workspace, params).await
+}
+
 #[tauri::command]
 async fn request_location(app: AppHandle) -> Result<String, String> {
     request_current_location(app).await
@@ -1188,6 +1199,12 @@ fn validated_workspace(cwd: &str) -> Result<String, String> {
     } else {
         PathBuf::from(requested)
     };
+    // Migrate the pre-organization default without breaking a persisted UI
+    // workspace from an older Jarvis build.
+    if !path.is_dir() && path.file_name().and_then(|name| name.to_str()) == Some("agent-workspace")
+    {
+        return default_workspace();
+    }
     if !path.is_dir() {
         return Err(format!("工作目录不存在或不是文件夹：{cwd}"));
     }
@@ -1869,6 +1886,7 @@ async fn resolve_server_request(
 #[tauri::command]
 async fn shutdown(state: State<'_, AppState>) -> Result<(), String> {
     stop_speech(&state).await;
+    state.pdfspine.shutdown().await;
     state.cipherpipe.stop().await;
     terminate_runtime(&state).await
 }
@@ -1887,6 +1905,7 @@ pub fn run() {
             runtime: Mutex::new(None),
             speech: Mutex::new(None),
             offline_speech: offline_speech::OfflineSpeech::new(),
+            pdfspine: pdfspine::PdfSpine::new(),
             cipherpipe: cipherpipe::CipherPipe::new(),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),

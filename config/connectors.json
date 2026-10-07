@@ -31,5 +31,12 @@
     "auth": "user-oauth-or-os-permission",
     "requiresConfirmation": false,
     "auditStream": "jarvis-events.jsonl"
+  },
+  "pdfspine": {
+    "kind": "document-ocr",
+    "enabledByDefault": true,
+    "binaryEnv": "JARVIS_PDFSPINE_BIN",
+    "auth": "workspace-file-access",
+    "auditStream": "jarvis-events.jsonl"
   }
 }

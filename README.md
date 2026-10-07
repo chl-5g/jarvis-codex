@@ -49,6 +49,16 @@ Jarvis does not simulate clicks in the Codex or ChatGPT applications, register
 a global hotkey, or create a separate GPT-Live session. It reuses the local
 Codex authentication and app-server runtime.
 
+## First principle: capability over constraint
+
+The agent harness should avoid restricting the LLM's capability. It exposes
+clear, discoverable tool interfaces and truthful runtime state, then lets the
+LLM decide which capability to call. It must not use keyword matching or a
+hard-coded intent list to pre-filter tools. The execution layer still enforces
+non-bypassable safety boundaries such as permissions, path scope, payload size,
+timeouts, process isolation, and audit logging; those are execution safeguards,
+not a substitute for model reasoning.
+
 ## Personal Agent direction
 
 Jarvis is intended to be a personal agent execution layer rather than another

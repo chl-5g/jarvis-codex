@@ -20,6 +20,16 @@ The wake listener and Voice session never capture the microphone concurrently.
 The Rust host terminates the listener and waits for `AVAudioEngine` to release
 the input device before WebRTC starts.
 
+## Capability harness
+
+The harness exposes capabilities as discoverable tool interfaces. The LLM
+chooses whether to call them; Jarvis does not pre-classify user text with
+keywords or a hard-coded intent list. Rust remains the execution boundary for
+permissions, workspace paths, payload limits, timeouts, process isolation, and
+audit events. Optional document OCR is registered as `pdfspine` in
+`config/connectors.json` and runs as one managed JSONL worker only when an OCR
+tool is selected.
+
 ## Thread lifecycle
 
 The frontend stores one thread ID per canonical workspace path. The Rust host

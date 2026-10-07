@@ -109,6 +109,21 @@ pub fn list() -> Vec<ToolSpec> {
             requires_full_access: false,
         },
         ToolSpec {
+            name: "ocr_image",
+            description: crate::config::tool_description("ocr_image"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "ocr_pdf",
+            description: crate::config::tool_description("ocr_pdf"),
+            requires_full_access: false,
+        },
+        ToolSpec {
+            name: "make_searchable_pdf",
+            description: crate::config::tool_description("make_searchable_pdf"),
+            requires_full_access: false,
+        },
+        ToolSpec {
             name: "memory_recall",
             description: crate::config::tool_description("memory_recall"),
             requires_full_access: false,
@@ -231,6 +246,30 @@ pub fn openai_schemas() -> Vec<Value> {
             &[],
         ),
         schema(
+            "ocr_image",
+            crate::config::tool_description("ocr_image"),
+            json!({
+                "path": {"type":"string"}, "language": {"type":"string"}, "dpi": {"type":"integer","minimum":72,"maximum":300}
+            }),
+            &["path"],
+        ),
+        schema(
+            "ocr_pdf",
+            crate::config::tool_description("ocr_pdf"),
+            json!({
+                "path": {"type":"string"}, "language": {"type":"string"}, "dpi": {"type":"integer","minimum":72,"maximum":300}
+            }),
+            &["path"],
+        ),
+        schema(
+            "make_searchable_pdf",
+            crate::config::tool_description("make_searchable_pdf"),
+            json!({
+                "path": {"type":"string"}, "output_path": {"type":"string"}, "language": {"type":"string"}, "dpi": {"type":"integer","minimum":72,"maximum":300}
+            }),
+            &["path", "output_path"],
+        ),
+        schema(
             "memory_recall",
             crate::config::tool_description("memory_recall"),
             json!({"query": {"type": "string"}}),
@@ -325,6 +364,11 @@ pub async fn execute(
             Err(error) => Err(error),
         },
         "capture_camera" => crate::request_camera_capture(app.clone()).await,
+        "ocr_image" | "ocr_pdf" | "make_searchable_pdf" => {
+            crate::request_pdfspine(app.clone(), workspace, tool_name, args)
+                .await
+                .map(|value| value.to_string())
+        }
         "memory_recall" => memory_recall(&args),
         "memory_save_core" => memory_save_core(&args),
         "memory_save_episode" => memory_save_episode(&args),
@@ -950,6 +994,23 @@ mod tests {
                 "missing model tool: {name}"
             );
         }
+    }
+
+    #[test]
+    fn document_ocr_tools_are_exposed_to_model_gateway() {
+        let names: Vec<String> = openai_schemas()
+            .into_iter()
+            .filter_map(|schema| {
+                schema
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .collect();
+        assert!(names.iter().any(|name| name == "ocr_image"));
+        assert!(names.iter().any(|name| name == "ocr_pdf"));
+        assert!(names.iter().any(|name| name == "make_searchable_pdf"));
     }
 
     #[test]
