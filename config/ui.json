@@ -5,6 +5,8 @@
   "messages": {
     "wakeMemoryLoaded": "唤醒前记忆已读取",
     "wakeMemoryFailed": "唤醒记忆读取失败",
+    "initializationComplete": "Jarvis 已完成初始化，请说唤醒词：嗨，Jarvis",
+    "initializationVoicePrompt": "请用一句简短的话说：Jarvis 已完成初始化，请说唤醒词：嗨，Jarvis。",
     "memoryGreetingPrompt": "向我自然地打个招呼，只说一句你好啊。",
     "voiceIdleSleep": "静默超时，Jarvis 已休眠；请再次说唤醒词",
     "voiceIdleSleepFailed": "自动休眠失败",

@@ -137,6 +137,7 @@ let voiceIdleSleepTimer: number | null = null;
 let voiceIdleSleepInFlight = false;
 let wakeArmInFlight: Promise<void> | null = null;
 let pendingMemoryGreeting = false;
+let pendingInitializationGreeting = false;
 const voiceAudio = new Audio();
 voiceAudio.autoplay = true;
 
@@ -780,6 +781,12 @@ async function handle(message: Message) {
       pendingMemoryGreeting = false;
       void invoke("append_codex_voice_text", { text: uiConfig.messages.memoryGreetingPrompt }).catch((error) => {
         appendStreamLine(`自动问候失败：${String(error)}`, "error");
+      });
+    }
+    if (pendingInitializationGreeting) {
+      pendingInitializationGreeting = false;
+      void invoke("append_codex_voice_text", { text: uiConfig.messages.initializationVoicePrompt }).catch((error) => {
+        appendStreamLine(`初始化语音提示失败：${String(error)}`, "error");
       });
     }
   } else if (method === "thread/realtime/transcript/delta") {
@@ -1697,7 +1704,7 @@ if (currentWindow) {
       const readyMessage = uiConfig.messages.initializationComplete;
       response.textContent = readyMessage;
       appendStreamLine(readyMessage, "system");
-      void invoke("speak_text", { text: readyMessage }).catch(() => undefined);
+      pendingInitializationGreeting = true;
     }
   } catch (error) { setMode("stopped"); response.textContent = `启动失败：${String(error)}`; }
 } else {
