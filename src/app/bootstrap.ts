@@ -1093,19 +1093,38 @@ async function verifySpeakerOnce(stream: MediaStream): Promise<SpeakerVerificati
     await invoke("stop_speaker_activity").catch(() => undefined);
   }
   try {
-    const score = typeof result.score === "number" ? result.score.toFixed(3) : "unknown";
-    const threshold = typeof result.threshold === "number" ? result.threshold.toFixed(3) : "unknown";
-    console.info("Jarvis speaker verification", { score, threshold });
-    state.speakerAccess = result.verified ? "allen" : "unknown";
-    await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
+    return await applySpeakerVerificationResult(result);
+  } catch (error) {
+    state.speakerAccess = "unknown";
+    await invoke("set_speaker_access", { speakerAccess: "unknown" }).catch(() => undefined);
     updateSpeakerAccess(state.speakerAccess);
-    appendStreamLine(
-      result.verified
-        ? `已验证：Allen（相似度 ${score}）`
-        : `未识别说话者：普通会话（相似度 ${score}，阈值 ${threshold}）`,
-      result.verified ? "system" : "error",
+    appendStreamLine(`声纹验证不可用：${String(error)}`, "error");
+    return { verified: false };
+  }
+}
+
+async function applySpeakerVerificationResult(result: SpeakerVerificationResult): Promise<SpeakerVerificationResult> {
+  const score = typeof result.score === "number" ? result.score.toFixed(3) : "unknown";
+  const threshold = typeof result.threshold === "number" ? result.threshold.toFixed(3) : "unknown";
+  console.info("Jarvis speaker verification", { score, threshold });
+  state.speakerAccess = result.verified ? "allen" : "unknown";
+  await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
+  updateSpeakerAccess(state.speakerAccess);
+  appendStreamLine(
+    result.verified
+      ? `已验证：Allen（相似度 ${score}）`
+      : `未识别说话者：普通会话（相似度 ${score}，阈值 ${threshold}）`,
+    result.verified ? "system" : "error",
+  );
+  return result;
+}
+
+async function verifySpeakerAudio(audio: string): Promise<SpeakerVerificationResult> {
+  response.textContent = voiceConfig.messages.speakerVerificationExtracting;
+  try {
+    return await applySpeakerVerificationResult(
+      await invoke<SpeakerVerificationResult>("verify_speaker", { audio }),
     );
-    return result;
   } catch (error) {
     state.speakerAccess = "unknown";
     await invoke("set_speaker_access", { speakerAccess: "unknown" }).catch(() => undefined);
@@ -1128,7 +1147,7 @@ async function ensureWorkspace() {
   return workspace;
 }
 
-async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } = {}) {
+async function startDirectVoice({ coldStart = false, speakerAudio }: { coldStart?: boolean; speakerAudio?: string } = {}) {
   if (SPEAKER_GATE_ENABLED && state.speakerAccess === "rejected") {
     const message = "未识别的说话人";
     response.textContent = message;
@@ -1178,13 +1197,18 @@ async function startDirectVoice({ coldStart = false }: { coldStart?: boolean } =
           // Attach the analyser before voiceprint capture. The avatar now reflects
           // the same microphone stream that the verifier is consuming.
           attachAnalyser(microphoneStream, "microphone");
-          // The wake phrase only triggers this path. It is too short and noisy to
-          // serve as an identity sample, so always capture a fresh full segment.
+          // Prefer the wake listener's buffered phrase: it contains the detected
+          // start/stop segment with a short pre-roll. Fall back to browser VAD
+          // only when a wake event did not include audio.
           let verification: SpeakerVerificationResult = { verified: false };
-          for (let attempt = 0; attempt < voiceConfig.timeouts.speakerVerificationAttempts; attempt += 1) {
-            if (attempt > 0) response.textContent = voiceConfig.messages.speakerVerificationRetryPrompt;
-            verification = await verifySpeakerOnce(microphoneStream);
-            if (verification.verified) break;
+          if (speakerAudio) {
+            verification = await verifySpeakerAudio(speakerAudio);
+          } else {
+            for (let attempt = 0; attempt < voiceConfig.timeouts.speakerVerificationAttempts; attempt += 1) {
+              if (attempt > 0) response.textContent = voiceConfig.messages.speakerVerificationRetryPrompt;
+              verification = await verifySpeakerOnce(microphoneStream);
+              if (verification.verified) break;
+            }
           }
           return { speakerAccess: state.speakerAccess, speakerScore: verification.score };
         },
@@ -1462,7 +1486,7 @@ if (currentWindow) {
       return;
     }
     banner.hidden = true;
-    void startDirectVoice({ coldStart: payload.cold === true });
+    void startDirectVoice({ coldStart: payload.cold === true, speakerAudio: payload.speakerAudio });
   });
 }
 $("#command-form").addEventListener("submit", async (event) => {

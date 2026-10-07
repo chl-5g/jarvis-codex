@@ -108,7 +108,7 @@ test("model providers are configuration-driven with an explicit fallback order",
 
 test("wake phrase opens the same direct Voice path", () => {
   assert.match(frontend, /listen<WakeEvent>\("jarvis-wake"/);
-  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true \}\)/);
+  assert.match(frontend, /void startDirectVoice\(\{ coldStart: payload\.cold === true, speakerAudio: payload\.speakerAudio \}\)/);
   assert.match(frontend, /const attempts = coldStart \? 6 : 1/);
   assert.match(frontend, /requestAnimationFrame\(\(\) => requestAnimationFrame/);
   assert.match(frontend, /recoverableColdStartError/);
@@ -376,6 +376,8 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(frontend, /feed_speaker_activity/);
   assert.match(frontend, /speakerVerificationCapturing/);
   assert.match(frontend, /speakerVerificationExtracting/);
+  assert.match(frontend, /verifySpeakerAudio\(speakerAudio\)/);
+  assert.match(frontend, /speakerAudio: payload\.speakerAudio/);
   assert.match(frontend, /await context\.resume\(\)/);
   assert.match(frontend, /resampleAudio\(chunk, captureRate, 16000\)/);
   assert.match(frontend, /speakerVerificationCaptureTimeoutMs/);
