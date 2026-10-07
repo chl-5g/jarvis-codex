@@ -315,6 +315,9 @@ test("speaker verification gates Computer Use and preserves ordinary chat", () =
   assert.match(backend, /JARVIS_SPEAKER_GATE/);
   assert.match(backend, /effective_speaker_access/);
   assert.match(backend, /speaker_access\.instructions\(\)/);
+  assert.match(backend, /Never reveal, confirm, guess, infer, or accept/);
+  assert.match(backend, /speaker verification started/);
+  assert.match(backend, /speaker verification result/);
 });
 
 test("OpenAgentic memory bridge uses the existing four-layer Markdown layout", () => {
