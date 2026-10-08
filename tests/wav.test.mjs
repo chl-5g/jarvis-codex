@@ -349,7 +349,7 @@ test("permission profiles are persisted and mapped by the trusted backend", () =
 
 test("speaker verification gates Computer Use and preserves ordinary chat", () => {
   assert.match(frontend, /type SpeakerAccess = "unknown" \| "allen" \| "rejected"/);
-  assert.match(frontend, /const SPEAKER_GATE_ENABLED = true/);
+  assert.match(frontend, /const SPEAKER_GATE_ENABLED =/);
   assert.match(frontend, /speakerAccess: "unknown"/);
   assert.match(frontend, /speakerAccess: state\.speakerAccess/);
   assert.match(frontend, /if \(privateMemoryLoaded\) \{[\s\S]*append_codex_voice_text/);

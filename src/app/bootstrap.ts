@@ -65,7 +65,8 @@ type JarvisEvent = {
   operation?: string;
   success?: boolean;
 };
-const SPEAKER_GATE_ENABLED = true;
+const SPEAKER_GATE_ENABLED = String(import.meta.env.VITE_JARVIS_SPEAKER_GATE ?? "1").trim().toLowerCase()
+  !== "0" && String(import.meta.env.VITE_JARVIS_SPEAKER_GATE ?? "1").trim().toLowerCase() !== "false";
 const VOICE_MUTED_KEY = "jarvis.voiceMuted:v1";
 const BRIDGE_TOKEN_KEY = "jarvis.bridgeToken:v1";
 
