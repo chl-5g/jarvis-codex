@@ -7,4 +7,5 @@ export JARVIS_WORKSPACE="$TASK_ROOT/workspace"
 export JARVIS_CODEX_BIN="$TASK_ROOT/Jarvis Codex.app/Contents/Resources/codex"
 export JARVIS_PYTHON='/Users/caihaolun/Documents/Codex/2026-10-05/ni/work/jarvis-venv/bin/python'
 export JARVIS_TTS_MODEL_DIR="$TASK_ROOT/models/kokoro"
+export JARVIS_FACE_LANDMARKER_MODEL="$TASK_ROOT/models/vision/face_landmarker.task"
 exec "$TASK_ROOT/Jarvis Codex.app/Contents/MacOS/jarvis-codex"

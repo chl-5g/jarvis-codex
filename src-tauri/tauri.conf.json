@@ -54,6 +54,8 @@
       "speech_worker.py": "speech_worker.py",
       "speaker_identity.py": "speaker_identity.py",
       "speaker_activity.py": "speaker_activity.py",
+      "vision_worker.py": "vision_worker.py",
+      "../models/vision/face_landmarker.task": "models/vision/face_landmarker.task",
       "cipherpipe_bridge.py": "cipherpipe_bridge.py"
     },
     "macOS": {

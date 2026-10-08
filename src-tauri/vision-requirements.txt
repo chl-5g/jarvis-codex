@@ -1,0 +1,3 @@
+# Optional local vision worker dependencies.
+mediapipe>=0.10.30
+numpy>=2.0

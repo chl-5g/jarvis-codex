@@ -4,6 +4,10 @@ declare module "*.mjs" {
   export function prefersCodexTask(text: string): boolean;
   export function shouldUseLocalQwen(input: { modelMode: "hybrid" | "qwen" | "codex"; voiceActive: boolean; text: string }): boolean;
   export function parseCipherPipeCommand(text: string): string | null;
+  export class AudioEventWindow {
+    constructor(sampleRate: number, windowMs?: number);
+    push(samples: Float32Array): Record<string, unknown> | null;
+  }
   export function runWorkflow(
     steps: Array<{
       name: string;

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>NSCameraUsageDescription</key>
-	<string>Jarvis does not capture video; this declaration allows WebKit to initialize its WebRTC media permission path.</string>
+	<string>Jarvis captures low-frequency camera frames only after explicit user consent and processes them locally for visual context.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Jarvis accesses files on the Desktop only when a task requires a file the user named.</string>
 	<key>NSDocumentsFolderUsageDescription</key>

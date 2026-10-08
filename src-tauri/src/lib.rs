@@ -32,6 +32,7 @@ mod memory;
 mod offline_speech;
 mod on_device_model;
 mod pdfspine;
+mod perception_context;
 mod skills;
 mod speaker_activity;
 mod tasks;
@@ -39,6 +40,7 @@ mod tools;
 mod workflow;
 
 const JARVIS_MODEL: &str = "gpt-5.6-sol";
+const MAX_CAMERA_FRAME_BYTES: usize = 512 * 1024;
 
 fn memory_store() -> memory::MemoryStore {
     memory::MemoryStore::default()
@@ -78,6 +80,10 @@ struct AppState {
     agent_registry: agent_registry::AgentRegistry,
     agent_tasks: agent_tasks::TaskStore,
     speaker_access: RwLock<SpeakerAccess>,
+    speaker_confidence: RwLock<Option<f64>>,
+    camera_consent: RwLock<bool>,
+    visual_context: RwLock<Option<Value>>,
+    audio_context: RwLock<Option<Value>>,
     speaker_activity: speaker_activity::SpeakerActivity,
     cold_wake_pending: AtomicBool,
     background_start: bool,
@@ -387,10 +393,17 @@ async fn verify_speaker(app: AppHandle, audio: String) -> Result<Value, String> 
 async fn set_speaker_access(
     state: State<'_, AppState>,
     speaker_access: SpeakerAccess,
+    speaker_confidence: Option<f64>,
 ) -> Result<String, String> {
     let access = effective_speaker_access(speaker_access);
     let mut runtime_changed = false;
     *state.speaker_access.write().await = access;
+    *state.speaker_confidence.write().await = speaker_confidence;
+    if access != SpeakerAccess::Allen {
+        *state.camera_consent.write().await = false;
+        *state.visual_context.write().await = None;
+        *state.audio_context.write().await = None;
+    }
     if let Some(runtime) = state.runtime.lock().await.as_ref() {
         runtime_changed = *runtime.speaker_access.read().await != access;
         *runtime.speaker_access.write().await = access;
@@ -411,6 +424,87 @@ async fn set_speaker_access(
         SpeakerAccess::Rejected => "rejected",
     }
     .to_owned())
+}
+
+#[tauri::command]
+async fn set_visual_context(
+    state: State<'_, AppState>,
+    visual: Option<Value>,
+) -> Result<String, String> {
+    if effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen {
+        *state.visual_context.write().await = None;
+        return Err("未通过声纹验证，不能启用视觉上下文".to_owned());
+    }
+    if !*state.camera_consent.read().await {
+        *state.visual_context.write().await = None;
+        return Err("尚未获得用户明确的摄像头同意".to_owned());
+    }
+    *state.visual_context.write().await = visual;
+    Ok("stored".to_owned())
+}
+
+#[tauri::command]
+async fn set_audio_context(
+    state: State<'_, AppState>,
+    audio: Option<Value>,
+) -> Result<String, String> {
+    if effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen {
+        *state.audio_context.write().await = None;
+        return Err("未通过声纹验证，不能保存个人声音上下文".to_owned());
+    }
+    *state.audio_context.write().await = audio;
+    Ok("stored".to_owned())
+}
+
+#[tauri::command]
+async fn set_camera_consent(state: State<'_, AppState>, consent: bool) -> Result<String, String> {
+    if consent
+        && effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen
+    {
+        return Err("未通过声纹验证，不能授权摄像头".to_owned());
+    }
+    *state.camera_consent.write().await = consent;
+    if !consent {
+        *state.visual_context.write().await = None;
+    }
+    Ok(if consent { "granted" } else { "revoked" }.to_owned())
+}
+
+#[tauri::command]
+async fn analyze_camera_frame(app: AppHandle, image_base64: String) -> Result<Value, String> {
+    let state = app.state::<AppState>();
+    if effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen {
+        return Err("未通过声纹验证，已阻止摄像头能力".to_owned());
+    }
+    if !*state.camera_consent.read().await {
+        return Err("尚未获得用户明确的摄像头同意".to_owned());
+    }
+    let encoded = image_base64
+        .strip_prefix("data:image/jpeg;base64,")
+        .or_else(|| image_base64.strip_prefix("data:image/png;base64,"))
+        .unwrap_or(&image_base64);
+    let bytes = STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("摄像头帧不是有效 Base64：{error}"))?;
+    if bytes.is_empty() || bytes.len() > MAX_CAMERA_FRAME_BYTES {
+        return Err("摄像头帧大小超出本地处理限制".to_owned());
+    }
+    let path = std::env::temp_dir().join(format!(
+        "jarvis-camera-frame-{}-{}.jpg",
+        std::process::id(),
+        agent_protocol::now()
+    ));
+    fs::write(&path, bytes).map_err(|error| format!("写入摄像头临时帧失败：{error}"))?;
+    let result = analyze_camera_photo(&app, path.to_string_lossy().as_ref()).await;
+    let _ = fs::remove_file(&path);
+    let face = result?;
+    *state.visual_context.write().await = Some(face.clone());
+    Ok(json!({
+        "type": "face_state",
+        "face": face,
+        "raw_frame_sent": false,
+        "raw_frame_persisted": false
+    }))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1116,6 +1210,13 @@ pub(crate) async fn request_camera_capture(app: AppHandle) -> Result<String, Str
     }
     #[cfg(target_os = "macos")]
     {
+        let state = app.state::<AppState>();
+        if effective_speaker_access(*state.speaker_access.read().await) != SpeakerAccess::Allen {
+            return Err("未通过声纹验证，已阻止摄像头能力".to_owned());
+        }
+        if !*state.camera_consent.read().await {
+            return Err("尚未获得用户明确的摄像头同意".to_owned());
+        }
         let helper = camera_helper_path(&app)?;
         let event_file =
             std::env::temp_dir().join(format!("jarvis-camera-{}.jsonl", std::process::id()));
@@ -1141,7 +1242,21 @@ pub(crate) async fn request_camera_capture(app: AppHandle) -> Result<String, Str
                         let _ = child.kill().await;
                         let _ = child.wait().await;
                         let _ = fs::remove_file(&event_file);
-                        return Ok(value.to_string());
+                        let path = value
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .ok_or("摄像头返回缺少临时图片")?;
+                        let result = analyze_camera_photo(&app, path).await;
+                        let _ = fs::remove_file(path);
+                        let face = result?;
+                        *app.state::<AppState>().visual_context.write().await = Some(face.clone());
+                        return Ok(json!({
+                            "type": "face_state",
+                            "face": face,
+                            "raw_frame_sent": false,
+                            "raw_frame_persisted": false
+                        })
+                        .to_string());
                     }
                     Some("error") => {
                         let message = value
@@ -1173,6 +1288,51 @@ pub(crate) async fn request_camera_capture(app: AppHandle) -> Result<String, Str
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
     }
+}
+
+async fn analyze_camera_photo(app: &AppHandle, path: &str) -> Result<Value, String> {
+    let resource = app
+        .path()
+        .resource_dir()
+        .map_err(|error| error.to_string())?;
+    let script = if resource.join("vision_worker.py").is_file() {
+        resource.join("vision_worker.py")
+    } else {
+        PathBuf::from(config::project_root()).join("src-tauri/vision_worker.py")
+    };
+    let model = std::env::var("JARVIS_FACE_LANDMARKER_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            let bundled = resource.join("models/vision/face_landmarker.task");
+            bundled.is_file().then_some(bundled)
+        })
+        .ok_or_else(|| {
+            "未配置 JARVIS_FACE_LANDMARKER_MODEL，且应用资源中没有 face_landmarker.task".to_owned()
+        })?;
+    let output = Command::new(offline_speech::speaker_python_path())
+        .arg(script)
+        .arg("--image")
+        .arg(path)
+        .arg("--model")
+        .arg(model)
+        .output()
+        .await
+        .map_err(|error| format!("启动视觉分析器失败：{error}"))?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("视觉分析器返回无效 JSON：{error}"))?;
+    if !output.status.success() || value.get("ok") != Some(&Value::Bool(true)) {
+        return Err(value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("视觉分析失败")
+            .to_owned());
+    }
+    value
+        .get("face")
+        .cloned()
+        .ok_or_else(|| "视觉分析结果缺少 face 状态".to_owned())
 }
 
 pub(crate) async fn request_pdfspine(
@@ -1797,7 +1957,21 @@ async fn append_codex_voice_text(state: State<'_, AppState>, text: String) -> Re
     }
     let thread_id = runtime.thread().await?;
     let speaker_access = *runtime.speaker_access.read().await;
-    let text = with_memory_context(text, speaker_access);
+    let visual = state.visual_context.read().await.clone();
+    let audio = state.audio_context.read().await.clone();
+    let speaker_confidence = *state.speaker_confidence.read().await;
+    let context = perception_context::build(
+        text,
+        speaker_access_label(speaker_access),
+        speaker_confidence,
+        visual,
+        audio,
+    );
+    let text = format!(
+        "{}\n\n{}",
+        perception_context::render(&context),
+        with_memory_context(text, speaker_access)
+    );
     runtime
         .request(
             "thread/realtime/appendText",
@@ -1823,7 +1997,21 @@ async fn send_text(
     }
     let thread_id = runtime.thread().await?;
     crate::logging::conversation("user", text.trim(), "codex");
-    let text = with_memory_context(&text, speaker_access);
+    let visual = state.visual_context.read().await.clone();
+    let audio = state.audio_context.read().await.clone();
+    let speaker_confidence = *state.speaker_confidence.read().await;
+    let context = perception_context::build(
+        &text,
+        speaker_access_label(speaker_access),
+        speaker_confidence,
+        visual,
+        audio,
+    );
+    let text = format!(
+        "{}\n\n{}",
+        perception_context::render(&context),
+        with_memory_context(&text, speaker_access)
+    );
     runtime
         .request(
             "turn/start",
@@ -2108,6 +2296,7 @@ async fn tool_execute(
 #[tauri::command]
 async fn local_qwen_chat(
     app: AppHandle,
+    state: State<'_, AppState>,
     text: String,
     workspace: Option<String>,
 ) -> Result<String, String> {
@@ -2117,7 +2306,34 @@ async fn local_qwen_chat(
         .transpose()?
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(default_workspace().unwrap_or_else(|_| ".".to_owned())));
+    let speaker_access = effective_speaker_access(*state.speaker_access.read().await);
+    if speaker_access == SpeakerAccess::Rejected {
+        return Err("未识别的说话人".to_owned());
+    }
+    let visual = state.visual_context.read().await.clone();
+    let audio = state.audio_context.read().await.clone();
+    let speaker_confidence = *state.speaker_confidence.read().await;
+    let context = perception_context::build(
+        &text,
+        speaker_access_label(speaker_access),
+        speaker_confidence,
+        visual,
+        audio,
+    );
+    let text = format!(
+        "{}\n\n{}",
+        perception_context::render(&context),
+        with_memory_context(&text, speaker_access)
+    );
     on_device_model::chat(app, text, workspace).await
+}
+
+fn speaker_access_label(access: SpeakerAccess) -> &'static str {
+    match access {
+        SpeakerAccess::Allen => "allen",
+        SpeakerAccess::Unknown => "unknown",
+        SpeakerAccess::Rejected => "rejected",
+    }
 }
 
 #[tauri::command]
@@ -2312,6 +2528,10 @@ pub fn run() {
             agent_registry: agent_registry::AgentRegistry::new(agent_registry::default_path()),
             agent_tasks: agent_tasks::TaskStore::new(agent_tasks::default_path()),
             speaker_access: RwLock::new(effective_speaker_access(SpeakerAccess::Unknown)),
+            speaker_confidence: RwLock::new(None),
+            camera_consent: RwLock::new(false),
+            visual_context: RwLock::new(None),
+            audio_context: RwLock::new(None),
             speaker_activity: speaker_activity::SpeakerActivity::new(),
             cold_wake_pending: AtomicBool::new(cold_wake_pending),
             background_start,
@@ -2336,6 +2556,10 @@ pub fn run() {
             feed_speaker_activity,
             stop_speaker_activity,
             set_speaker_access,
+            set_camera_consent,
+            analyze_camera_frame,
+            set_visual_context,
+            set_audio_context,
             speech_permission_status,
             request_location,
             request_capability,

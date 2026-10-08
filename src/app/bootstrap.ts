@@ -11,6 +11,7 @@ import { refreshBridgeStatus as refreshBridgeStatusModule, showBridgeStatus as s
 import { cleanupVoiceResources, persistVoiceMute } from "../voice/voice-resources";
 import { createWakeController } from "../voice/wake-controller";
 import { createVoiceController } from "../voice/voice-controller";
+import { AudioEventWindow } from "../voice/audio-events.mjs";
 import { runWorkflow } from "../workflows/voice-workflow.mjs";
 import { ensureWorkspace as ensureWorkspaceModule, saveThreadId, saveWorkspace, savedThreadId as getSavedThreadId, savedWorkspace as getSavedWorkspace } from "../codex/session-store";
 // Session storage keys remain documented here for source-level compatibility: jarvis.workspace, jarvis.threadId:v5-speaker:
@@ -129,6 +130,16 @@ let remoteStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let microphoneAnalyser: AnalyserNode | null = null;
 let remoteAnalyser: AnalyserNode | null = null;
+let audioEventSource: MediaStreamAudioSourceNode | null = null;
+let audioEventProcessor: ScriptProcessorNode | null = null;
+let audioEventGain: GainNode | null = null;
+let audioEventWindow: AudioEventWindow | null = null;
+let cameraStream: MediaStream | null = null;
+let cameraVideo: HTMLVideoElement | null = null;
+let cameraCanvas: HTMLCanvasElement | null = null;
+let cameraTimer: number | null = null;
+let cameraCaptureInFlight = false;
+let cameraConsent = false;
 // The verifier and avatar share this value while the initial microphone
 // segment is being captured. It is written by the same ScriptProcessor frame
 // that decides whether a voiced segment has started.
@@ -245,6 +256,7 @@ const degradedTitle = $("#degraded-title");
 const mic = $("#mic") as HTMLButtonElement;
 const approval = $("#approval") as HTMLDialogElement;
 const settings = $("#settings-dialog") as HTMLDialogElement;
+settings.insertAdjacentHTML("afterbegin", '<fieldset class="permission-setting"><legend>视觉上下文</legend><p id="camera-consent-status">本次会话摄像头未授权</p><div class="settings-actions"><button id="grant-camera-consent" type="button">允许本次会话使用摄像头</button><button id="revoke-camera-consent" type="button">撤销摄像头授权</button></div></fieldset>');
 const exitButton = document.createElement("button");
 exitButton.id = "exit-jarvis";
 exitButton.type = "button";
@@ -961,7 +973,96 @@ function attachAnalyser(stream: MediaStream, target: "microphone" | "remote") {
   else remoteAnalyser = analyser;
 }
 
+function startAudioEventMonitor(stream: MediaStream) {
+  stopAudioEventMonitor();
+  audioContext ??= new AudioContext({ sampleRate: 16000 });
+  audioEventWindow = new AudioEventWindow(audioContext.sampleRate, 2000);
+  audioEventSource = audioContext.createMediaStreamSource(stream);
+  audioEventProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+  audioEventGain = audioContext.createGain();
+  audioEventGain.gain.value = 0;
+  audioEventSource.connect(audioEventProcessor);
+  audioEventProcessor.connect(audioEventGain);
+  audioEventGain.connect(audioContext.destination);
+  audioEventProcessor.onaudioprocess = (event) => {
+    const window = audioEventWindow;
+    if (!window) return;
+    const update = window.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+    if (update) void invoke("set_audio_context", { audio: { ...update, source: "local_voice_window" } }).catch(() => undefined);
+  };
+  void audioContext.resume();
+}
+
+function stopAudioEventMonitor() {
+  if (audioEventProcessor) audioEventProcessor.onaudioprocess = null;
+  audioEventSource?.disconnect();
+  audioEventProcessor?.disconnect();
+  audioEventGain?.disconnect();
+  audioEventSource = null;
+  audioEventProcessor = null;
+  audioEventGain = null;
+  audioEventWindow = null;
+}
+
+async function sampleCameraFrame() {
+  if (!cameraVideo || !cameraCanvas || cameraCaptureInFlight || cameraVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+  cameraCaptureInFlight = true;
+  try {
+    const width = 320;
+    const height = Math.max(180, Math.round(width * (cameraVideo.videoHeight / Math.max(1, cameraVideo.videoWidth))));
+    cameraCanvas.width = width;
+    cameraCanvas.height = height;
+    const context = cameraCanvas.getContext("2d", { alpha: false });
+    if (!context) return;
+    context.drawImage(cameraVideo, 0, 0, width, height);
+    const dataUrl = cameraCanvas.toDataURL("image/jpeg", 0.62);
+    await invoke("analyze_camera_frame", { imageBase64: dataUrl });
+  } catch (error) {
+    // Camera failure must not stop voice. The one-shot native camera tool
+    // remains available for an explicit visual question.
+    console.debug("local camera frame skipped", error);
+  } finally {
+    cameraCaptureInFlight = false;
+  }
+}
+
+async function startCameraMonitor() {
+  if (!currentWindow || !cameraConsent || cameraStream) return;
+  if (state.speakerAccess !== "allen") return;
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 5, max: 8 } },
+      audio: false,
+    });
+    cameraVideo = document.createElement("video");
+    cameraVideo.muted = true;
+    cameraVideo.playsInline = true;
+    cameraVideo.srcObject = cameraStream;
+    await cameraVideo.play();
+    cameraCanvas = document.createElement("canvas");
+    cameraTimer = window.setInterval(() => void sampleCameraFrame(), 2_000);
+    await sampleCameraFrame();
+    appendStreamLine("本地视觉采样已启动，只发送表情摘要", "system");
+  } catch (error) {
+    stopCameraMonitor();
+    appendStreamLine("本地视觉采样未启动：" + String(error), "error");
+  }
+}
+
+function stopCameraMonitor() {
+  if (cameraTimer !== null) window.clearInterval(cameraTimer);
+  cameraTimer = null;
+  cameraStream?.getTracks().forEach((track) => track.stop());
+  cameraStream = null;
+  if (cameraVideo) cameraVideo.srcObject = null;
+  cameraVideo = null;
+  cameraCanvas = null;
+  cameraCaptureInFlight = false;
+}
+
 function cleanupPeer() {
+  stopAudioEventMonitor();
+  stopCameraMonitor();
   cleanupVoiceResources({ peer, microphoneStream, remoteStream, audioContext, microphoneAnalyser, remoteAnalyser });
   peer = null;
   microphoneStream = null;
@@ -1080,11 +1181,14 @@ async function verifySpeakerOnce(stream: MediaStream): Promise<SpeakerVerificati
       requestChain = requestChain.then(async () => {
         if (settled) return;
         const normalized = resampleAudio(chunk, captureRate, 16000);
-        const activity = await invoke<{ ready: boolean; speaking: boolean; speechMs: number; audio?: string }>("feed_speaker_activity", { pcm: encodePcmFrame(normalized) });
+        const activity = await invoke<{ ready: boolean; speaking: boolean; speechMs: number; audio?: string; audioEvents?: Record<string, unknown> }>("feed_speaker_activity", { pcm: encodePcmFrame(normalized) });
         if (activity.speaking) response.textContent = voiceConfig.messages.speakerVerificationCapturing;
         if (!activity.ready || !activity.audio) return;
         response.textContent = voiceConfig.messages.speakerVerificationExtracting;
         const verification = await invoke<SpeakerVerificationResult>("verify_speaker", { audio: activity.audio });
+        if (verification.verified && activity.audioEvents) {
+          await invoke("set_audio_context", { audio: activity.audioEvents }).catch(() => undefined);
+        }
         finish(undefined, verification);
       }).catch((error) => finish(error instanceof Error ? error : new Error(String(error))));
     };
@@ -1109,7 +1213,14 @@ async function applySpeakerVerificationResult(result: SpeakerVerificationResult)
   const threshold = typeof result.threshold === "number" ? result.threshold.toFixed(3) : "unknown";
   console.info("Jarvis speaker verification", { score, threshold });
   state.speakerAccess = result.verified ? "allen" : "unknown";
-  await invoke("set_speaker_access", { speakerAccess: state.speakerAccess });
+  await invoke("set_speaker_access", {
+    speakerAccess: state.speakerAccess,
+    speakerConfidence: result.score,
+  });
+  if (!result.verified) {
+    cameraConsent = false;
+    stopCameraMonitor();
+  }
   updateSpeakerAccess(state.speakerAccess);
   appendStreamLine(
     result.verified
@@ -1210,6 +1321,10 @@ async function startDirectVoice({ coldStart = false, speakerAudio }: { coldStart
               verification = await verifySpeakerOnce(microphoneStream);
               if (verification.verified) break;
             }
+          }
+          if (verification.verified && microphoneStream) {
+            startAudioEventMonitor(microphoneStream);
+            if (cameraConsent) void startCameraMonitor();
           }
           return { speakerAccess: state.speakerAccess, speakerScore: verification.score };
         },
@@ -1655,6 +1770,30 @@ $("#request-all-permissions").addEventListener("click", async () => {
   } catch (error) {
     appendStreamLine(String(error), "error");
     response.textContent = String(error);
+  }
+});
+$("#grant-camera-consent").addEventListener("click", async () => {
+  const status = $("#camera-consent-status");
+  try {
+    await invoke("set_camera_consent", { consent: true });
+    cameraConsent = true;
+    status.textContent = "本次会话已允许摄像头；首次使用时仍由 macOS 单独申请系统权限";
+    appendStreamLine("已获得本次会话的摄像头明确同意", "system");
+    void startCameraMonitor();
+  } catch (error) {
+    status.textContent = `摄像头同意失败：${String(error)}`;
+  }
+});
+$("#revoke-camera-consent").addEventListener("click", async () => {
+  const status = $("#camera-consent-status");
+  try {
+    await invoke("set_camera_consent", { consent: false });
+    cameraConsent = false;
+    stopCameraMonitor();
+    status.textContent = "本次会话摄像头未授权";
+    appendStreamLine("已撤销本次会话的摄像头同意", "system");
+  } catch (error) {
+    status.textContent = `撤销摄像头同意失败：${String(error)}`;
   }
 });
 $("#bridge-enable").addEventListener("click", async () => {

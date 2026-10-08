@@ -8,6 +8,65 @@ import struct
 import sys
 import wave
 
+import numpy as np
+
+
+def summarize_audio(samples, rate):
+    """Return bounded local audio features; never include samples or a waveform."""
+    values = np.asarray(samples, dtype=np.float32)
+    if values.size == 0 or rate <= 0:
+        return {
+            "duration_ms": 0,
+            "volume": "unknown",
+            "cough_count": 0,
+            "breathing": "unknown",
+        }
+    rms = float(np.sqrt(np.mean(np.square(values))))
+    volume = "quiet" if rms < 0.03 else "normal" if rms < 0.2 else "loud"
+    frame_size = max(1, round(rate * 0.02))
+    frame_rms = np.asarray(
+        [
+            np.sqrt(np.mean(np.square(values[index : index + frame_size])))
+            for index in range(0, len(values), frame_size)
+            if len(values[index : index + frame_size])
+        ],
+        dtype=np.float32,
+    )
+    baseline = max(float(np.median(frame_rms)), 0.01)
+    burst = frame_rms > max(0.45, baseline * 3.5)
+    quiet = frame_rms < max(0.015, baseline * 0.45)
+    cough_count = 0
+    breath_like_pause_count = 0
+    in_burst = False
+    burst_frames = 0
+    quiet_frames = 0
+    for active, quiet_frame in zip(burst, quiet):
+        if active:
+            in_burst = True
+            burst_frames += 1
+        elif in_burst:
+            if 2 <= burst_frames <= 25:
+                cough_count += 1
+            in_burst = False
+            burst_frames = 0
+        if quiet_frame:
+            quiet_frames += 1
+        elif quiet_frames:
+            if 4 <= quiet_frames <= 40:
+                breath_like_pause_count += 1
+            quiet_frames = 0
+    if in_burst and 2 <= burst_frames <= 25:
+        cough_count += 1
+    if 4 <= quiet_frames <= 40:
+        breath_like_pause_count += 1
+    return {
+        "duration_ms": round(values.size * 1000 / rate),
+        "volume": volume,
+        "cough_count": min(cough_count, 8),
+        "breath_like_pause_count": min(breath_like_pause_count, 8),
+        "breathing": "possible" if breath_like_pause_count else "not_detected",
+    }
+
 
 class SpeechSamples:
     """Only accepts segments confirmed by VAD, never ambient microphone frames."""
@@ -68,8 +127,10 @@ def serve(settings):
                 segment.add(vad.front.samples)
                 vad.pop()
                 if segment.ready:
+                    audio_events = summarize_audio(segment.samples, 16000)
                     result = {"ready": True, "speaking": True, "speechMs": segment.duration_ms,
-                              "segmentEnded": True, "audio": base64.b64encode(segment.wav()).decode("ascii")}
+                              "segmentEnded": True, "audio": base64.b64encode(segment.wav()).decode("ascii"),
+                              "audioEvents": audio_events}
                     print(json.dumps(result), flush=True)
                     return
         result = {"ready": False, "speaking": saw_speech, "speechMs": 0, "segmentEnded": False}
